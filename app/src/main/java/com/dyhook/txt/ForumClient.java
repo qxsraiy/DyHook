@@ -22,7 +22,7 @@ import java.nio.charset.StandardCharsets;
  *      url=https://example.com
  *      username=xxx
  *      password=xxx
- *      tag_slug=gurensi      （可选，默认发到该标签）
+ *      tag_slug=your-tag-slug      （可选，默认发到该标签）
  *      tag_id=15             （可选，填了就不查 slug）
  */
 public class ForumClient {

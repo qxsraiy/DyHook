@@ -47,7 +47,7 @@
 url=https://your-forum.com
 username=xxx
 password=xxx
-tag_slug=gurensi
+tag_slug=your-tag-slug
 tag_id=15
 ```
 
