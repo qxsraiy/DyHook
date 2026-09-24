@@ -137,8 +137,12 @@ public class SendActionReceiver extends BroadcastReceiver {
         }, "dyhook-uisend").start();
     }
 
-    /** 成品是 青空_标题_作者_时间戳.txt，源文件是 源_时间戳_标题_作者.txt，按标题+时间猜。 */
-    private static String guessRawPath(String namedPath) {
+    /**
+     * 成品是 青空_&lt;标题&gt;_&lt;作者&gt;_&lt;yyyyMMdd&gt;_&lt;HHmmss&gt;.txt
+     * 源文件是 源_&lt;yyyyMMdd&gt;_&lt;HHmmss&gt;_&lt;标题&gt;_&lt;作者&gt;.txt
+     * 注意时间戳自身含下划线，要按「最后两段」取。
+     */
+    public static String guessRawPath(String namedPath) {
         try {
             File named = new File(namedPath);
             String n = named.getName();
@@ -146,19 +150,32 @@ public class SendActionReceiver extends BroadcastReceiver {
             String stem = n.substring(3);
             int dot = stem.lastIndexOf('.');
             if (dot > 0) stem = stem.substring(0, dot);
-            // 青空_<标题>_<作者>_<时间戳>
+
             String[] parts = stem.split("_");
-            if (parts.length < 2) return null;
-            String ts = parts[parts.length - 1];
-            String author = parts.length >= 3 ? parts[parts.length - 2] : "";
-            String title = stem.substring(0, stem.length() - ts.length() - 1
-                    - (author.isEmpty() ? 0 : author.length() + 1));
+            if (parts.length < 3) return null;
+            String ts = parts[parts.length - 2] + "_" + parts[parts.length - 1]; // yyyyMMdd_HHmmss
+            if (!ts.matches("\\d{8}_\\d{6}")) return null;
+
+            // 标题 = 去掉尾部 <作者>_<时间戳> 之后剩下的
+            StringBuilder titleB = new StringBuilder();
+            for (int i = 0; i < parts.length - 3; i++) {
+                if (titleB.length() > 0) titleB.append('_');
+                titleB.append(parts[i]);
+            }
+            String title = titleB.toString();
+
             File dir = new File(FileSaver.OUT_DIR);
             File[] all = dir.listFiles();
             if (all == null) return null;
+
+            // 优先：源_<ts>_<标题>...
             String want = "源_" + ts + "_" + title;
             for (File f : all) {
                 if (f.getName().startsWith(want)) return f.getAbsolutePath();
+            }
+            // 兜底：只要时间戳对得上
+            for (File f : all) {
+                if (f.getName().startsWith("源_" + ts + "_")) return f.getAbsolutePath();
             }
         } catch (Throwable ignored) {
         }
@@ -307,7 +324,8 @@ public class SendActionReceiver extends BroadcastReceiver {
             sb.append(author);
             sb.append("\n\n\u3000\n\n");   // 作者名下面空 1 行
         }
-        sb.append(p.content);
+        // 发帖前再清洗一次：HTML 标签 / 代码围栏 / 行首缩进（会渲染成代码框）
+        sb.append(AiClient.cleanText(p.content));
         return sb.toString();
     }
 

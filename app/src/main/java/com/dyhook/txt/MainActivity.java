@@ -58,6 +58,7 @@ public class MainActivity extends Activity {
         LinearLayout outer = new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setBackgroundColor(BG);
+        outer.setFitsSystemWindows(true);
 
         // 内容区
         contentBox = new LinearLayout(this);
@@ -77,15 +78,41 @@ public class MainActivity extends Activity {
 
         contentScroll = new ScrollView(this);
         contentScroll.setBackgroundColor(BG);
+        contentScroll.setFillViewport(true);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(30), dp(16), dp(32));
-        contentScroll.addView(root);
-        contentBox.addView(contentScroll);
+        root.setPadding(dp(16), dp(22), dp(16), dp(32));
+        contentScroll.addView(root, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // 关键：ScrollView 必须撑满内容区，否则会被压扁导致内容被裁切/遮挡
+        contentBox.addView(contentScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        applyInsets(outer);
 
         buildTabBar();
         render();
         return outer;
+    }
+
+    /** 给内容区加状态栏内边距、底栏加导航栏内边距，避免标题被系统栏压住。 */
+    private void applyInsets(final View outer) {
+        try {
+            outer.setOnApplyWindowInsetsListener((v, insets) -> {
+                int top = 0, bottom = 0;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    try {
+                        top = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top;
+                        bottom = insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom;
+                    } catch (Throwable ignored) {
+                    }
+                }
+                contentBox.setPadding(0, top, 0, 0);
+                tabBar.setPadding(0, dp(6), 0, dp(6) + bottom);
+                return insets;
+            });
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 底栏两个图标：设置 / 待发件。 */
@@ -327,7 +354,37 @@ public class MainActivity extends Activity {
             root.postDelayed(this::renderFiles, 6000);
         });
         row.addView(b);
+
+        // 点击整行 → 确认删除（连源文件一起删）
+        row.setOnClickListener(v -> confirmDelete(f));
         return row;
+    }
+
+    /** 点列表行：确认后删除成品 + 配对的源文件。 */
+    private void confirmDelete(java.io.File f) {
+        String title = readTitle(f);
+        String rawPath = SendActionReceiver.guessRawPath(f.getAbsolutePath());
+        DyLog.i("[列表] 点击删除 " + f.getName() + " -> 配对源文件=" + rawPath);
+        String extra = (rawPath == null) ? ""
+                : "\n\n同时会删除源文件：\n" + new java.io.File(rawPath).getName();
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("确认删除吗？")
+                .setMessage(title + extra + "\n\n删除后不可恢复。")
+                .setPositiveButton("删除", (d, w) -> {
+                    boolean ok1 = f.delete();
+                    boolean ok2 = true;
+                    if (rawPath != null) {
+                        java.io.File rf = new java.io.File(rawPath);
+                        if (rf.exists()) ok2 = rf.delete();
+                    }
+                    DyLog.i("[列表] 删除 " + f.getName() + " ok=" + ok1
+                            + " | 源文件 ok=" + ok2);
+                    android.widget.Toast.makeText(this,
+                            (ok1 ? "✅ 已删除" : "❌ 删除失败"), android.widget.Toast.LENGTH_SHORT).show();
+                    renderFiles();
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     /** 从文件头读「标题：」，读不到就用文件名。 */

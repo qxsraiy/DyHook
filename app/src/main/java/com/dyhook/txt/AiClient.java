@@ -158,30 +158,37 @@ public class AiClient {
         sb.append("  \"content\": 清洗后的正文全文。\n\n");
 
         sb.append("【content 的清洗规则 —— 这是重点，务必执行】\n");
-        sb.append("1. 去掉所有 HTML 标签：<br>、<br/>、<br />、<p>、</p>、<div>、<span>、");
-        sb.append("<a ...>、<img ...>、&nbsp;、&amp;、&lt;、&gt; 等。\n");
-        sb.append("   - <br> 这类换行标签要**转成真正的换行**，不要直接删掉导致文字粘连。\n");
+        sb.append("1. **输出必须是纯文本**，绝对不允许出现任何 HTML 标签。\n");
+        sb.append("   - 特别是 <br>、<br/>、<br />、<p>、</p>、<div>、<span>、<a>、<img> 等，");
+        sb.append("一个都不能留。\n");
+        sb.append("   - 需要换行就直接换行（用真正的换行符），不要写 <br/>。\n");
         sb.append("   - HTML 实体要还原成对应字符（&nbsp;→空格、&amp;→&、&quot;→\"、&lt;→<）。\n");
-        sb.append("2. 修正错误的引号写法：\n");
-        sb.append("   - 连续重复的引号（如 \"\"文字\"\"、''文字''、``文字``）→ 修正成一对中文引号「」或\"\"。\n");
-        sb.append("   - 中英文引号混用、左右引号不配对 → 统一成中文全角引号 \" \" 或 「 」。\n");
-        sb.append("3. 去掉转义残留：正文里出现的字面 \\n、\\t、\\\" 、\\\\ 等要还原成正常字符。\n");
-        sb.append("4. 去掉分享口令与引流话术：\n");
+        sb.append("2. **不允许使用 markdown 语法**，因为正文会被当作纯文本渲染：\n");
+        sb.append("   - 不要用 ``` 代码围栏，不要用 ` 反引号。\n");
+        sb.append("   - **每行开头不要有 4 个及以上空格、也不要缩进、不要用 Tab** ——");
+        sb.append("这会被渲染成「代码框」，是必须避免的。\n");
+        sb.append("   - 不要用 # 做标题、不要用 > 做引用、不要用 - / * 做列表符号。\n");
+        sb.append("   - 需要分段就用空行，需要强调就用中文引号或书名号。\n");
+        sb.append("3. 修正错误的引号写法：\n");
+        sb.append("   - 连续重复的引号（如 \"\"文字\"\"、''文字''）→ 修正成一对中文引号「」或\"\"。\n");
+        sb.append("   - 中英文引号混用、左右引号不配对 → 统一成中文全角引号。\n");
+        sb.append("4. 去掉转义残留：正文里出现的字面 \\n、\\t、\\\" 、\\\\ 等要还原成正常字符。\n");
+        sb.append("5. 去掉分享口令与引流话术：\n");
         sb.append("   「2H-:/a …^^xxxx」「复制打开抖音」「长按复制打开抖音」");
         sb.append("「看看【xxx的作品】」「打开抖音看更多」之类，整行删掉。\n");
-        sb.append("5. 清理排版：\n");
+        sb.append("6. 清理排版：\n");
         sb.append("   - 合并连续的空行（最多保留一个空行分段）。\n");
         sb.append("   - 去掉行首行尾多余空格、去掉全角空格。\n");
         sb.append("   - 修掉被硬折行拆断的句子（同一段落内的换行合成一句）。\n");
-        sb.append("6. 语言规范化（**只做轻度润色，不改原意、不增删信息**）：\n");
+        sb.append("7. 语言规范化（**只做轻度润色，不改原意、不增删信息**）：\n");
         sb.append("   - 网络用语、错别字、明显笔误 → 改成规范书面表达。\n");
         sb.append("   - 全角/半角混用、标点缺失 → 按中文标点规范统一。\n");
         sb.append("   - 不要改变作者的观点、语气与立场，不要摘要、不要扩写。\n");
-        sb.append("7. content 里不要再包含标题行、作者行。\n");
-        sb.append("8. 正文里正常出现的符号（#、——、【】、：、引号等）是正文的一部分，原样保留。\n");
-        sb.append("9. 绝对不要编造原文中不存在的内容。\n");
-        sb.append("10. title / author 字段里只放标题和作者本身，");
-        sb.append("不要带括号注释、说明文字、来源标注。\n\n");
+        sb.append("8. content 里不要再包含标题行、作者行。\n");
+        sb.append("9. 正文里正常出现的符号（#、——、【】、：、引号等）是正文的一部分，原样保留。\n");
+        sb.append("10. 绝对不要编造原文中不存在的内容。\n");
+        sb.append("11. title / author 字段里只放标题和作者本身，");
+        sb.append("不要带括号注释、说明文字、来源标注、更不要带任何标签。\n\n");
 
         sb.append("【JSON 格式要求】\n");
         sb.append("字符串里的换行写成 \\n，双引号写成 \\\"，确保输出是合法 JSON。\n\n");
@@ -206,6 +213,92 @@ public class AiClient {
         return sb.toString();
     }
 
+    /**
+     * 代码级强制清洗（不依赖 AI 是否听话）。
+     * 解决两类顽固问题：
+     *   1) 残留 HTML 标签（尤其 <br/>）
+     *   2) 会被 Flarum 渲染成「代码框」的内容：
+     *      - ``` 围栏
+     *      - 行首 4 个以上空格 / Tab（markdown 代码块语法）
+     *      - 行内反引号
+     */
+    public static String cleanText(String s) {
+        if (s == null) return null;
+        String t = s;
+
+        // 1) <br> 家族 → 真换行
+        t = t.replaceAll("(?i)<\\s*br\\s*/?\\s*>", "\n");
+        // 2) 段落标签
+        t = t.replaceAll("(?i)<\\s*/\\s*p\\s*>", "\n\n");
+        t = t.replaceAll("(?i)<\\s*p[^>]*>", "");
+        // 3) 其它常见 HTML 标签整体去掉
+        t = t.replaceAll("(?i)<\\s*/?\\s*(div|span|section|article|header|footer|main|"
+                + "strong|b|em|i|u|s|del|ins|a|img|figure|figcaption|table|thead|tbody|"
+                + "tr|td|th|ul|ol|li|h[1-6]|font|blockquote|hr|pre|code|iframe|video|audio|source)"
+                + "[^>]*>", "");
+        // 4) 兜底：剩下的尖括号标签也去掉（但保留正文里的数学比较符：只在像标签时删）
+        t = t.replaceAll("<\\s*/?\\s*[a-zA-Z][a-zA-Z0-9]{0,12}(\\s[^>]{0,200})?/?\\s*>", "");
+
+        // 5) HTML 实体还原
+        t = t.replace("&nbsp;", " ").replace("&#160;", " ")
+                .replace("&lt;", "<").replace("&gt;", ">")
+                .replace("&quot;", "\"").replace("&#34;", "\"")
+                .replace("&#39;", "'").replace("&apos;", "'")
+                .replace("&mdash;", "—").replace("&ndash;", "–")
+                .replace("&hellip;", "…").replace("&amp;", "&");
+        // 5b) 数字实体：&#96; / &#x60; 之类
+        t = decodeNumericEntities(t);
+
+        // 6) 去掉 markdown 代码围栏（``` 或 ~~~）
+        t = t.replaceAll("(?m)^[ \\t]*(```|~~~)[a-zA-Z0-9+#-]*[ \\t]*$", "");
+        // 7) 去掉行内反引号（避免出现「可复制的代码块」样式）
+        t = t.replace("`", "");
+
+        // 8) 去掉行首 4+ 空格 / Tab —— 这是 markdown 代码块的触发条件
+        String[] lines = t.split("\n", -1);
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            String l = line;
+            if (l.length() > 0) {
+                int i = 0;
+                while (i < l.length() && (l.charAt(i) == ' ' || l.charAt(i) == '\t'
+                        || l.charAt(i) == '\u3000')) {
+                    i++;
+                }
+                // 全角空格也算缩进，统一去掉
+                l = l.substring(i);
+            }
+            sb.append(l).append('\n');
+        }
+        t = sb.toString();
+
+        // 9) 收敛空行
+        t = t.replaceAll("[ \\t]+\\n", "\n");
+        t = t.replaceAll("\\n{3,}", "\n\n");
+
+        return t.trim();
+    }
+
+    /** 解码 &#96; / &#x60; 这类数字实体。 */
+    private static String decodeNumericEntities(String s) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("&#(x?)([0-9a-fA-F]{1,6});").matcher(s);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            try {
+                int cp = m.group(1).isEmpty()
+                        ? Integer.parseInt(m.group(2))
+                        : Integer.parseInt(m.group(2), 16);
+                m.appendReplacement(sb, java.util.regex.Matcher
+                        .quoteReplacement(new String(Character.toChars(cp))));
+            } catch (Throwable t) {
+                m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(m.group()));
+            }
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
     /** 从 AI 返回里抽出 JSON（容错：可能带 ```json 包裹或前后废话）。 */
     private static void parseStructured(String content, Result r) {
         String s = content.trim();
@@ -223,11 +316,14 @@ public class AiClient {
             JSONObject o = new JSONObject(s);
             r.title = o.optString("title", "").trim();
             r.author = o.optString("author", "").trim();
-            r.content = o.optString("content", "").trim();
+            r.content = cleanText(o.optString("content", "").trim());
         } catch (Throwable t) {
             DyLog.w("[AI] JSON 解析失败，退回整段文本");
-            r.content = content.trim();
+            r.content = cleanText(content.trim());
         }
+        // 标题/作者也过一遍，防止带上标签
+        r.title = cleanText(r.title);
+        if (r.author != null) r.author = cleanText(r.author);
     }
 
     private static String readAll(InputStream is) throws Exception {

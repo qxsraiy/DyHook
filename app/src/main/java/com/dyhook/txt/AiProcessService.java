@@ -126,6 +126,7 @@ public class AiProcessService extends Service {
                 }
             } else {
                 DyLog.i("[服务] AI 未开启，成品按原文保存");
+                content = AiClient.cleanText(content);
             }
 
             // 3) 组装 标题 / 作者
