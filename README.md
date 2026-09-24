@@ -1,0 +1,134 @@
+# 抖音文案提取（DyHook）
+
+一个 LSPosed 模块（**LibXposed API 102**）：在抖音里复制长文章的分享口令时，
+自动抓取文章正文 + 作者（昵称/抖音号），可选交给 AI 结构化，落盘为 txt 并弹出通知栏。
+
+> 只在**文章详情页**分享才生效，视频链接一律放过。
+
+## 功能
+
+- **自动抓取**：在抖音长文章页 → 分享 → 复制口令 → 自动解析
+- **正文来源**：`com.ss.ugc.aweme.ArticleInfoStruct`（含 markdown 全文）
+- **作者来源**：`ArticleDetailData.aweme.author` → 昵称 + 抖音号，输出形如 `昵称（抖音号）by抖音`
+- **AI 结构化**（可选）：兼容 OpenAI 的 `/v1/chat/completions` 接口（OpenAI / DeepSeek / NewAPI 等），
+  让 AI 把原文整理成 `{title, author, content}` JSON，去掉口令、引流话术等噪声
+- **输出两个文件**：
+  - 源文件：`源_时间戳_标题_作者.txt`（原始抓取内容，AI 失败也不会丢）
+  - 成品：`青空_标题_作者_时间戳.txt`（AI 结构化后）
+- **通知栏**：处理中 / 完成都有通知，完成通知带「**发件**」按钮（发论坛的接口已预留）
+- **系统分享接收**：任意 App 分享文字到本模块，也会按同样格式保存为「个人复制」
+- 模块界面可配置 AI 地址 / Key / 模型，并有「测试 AI 连接」按钮
+
+## 目录
+
+```
+app/src/main/java/com/dyhook/txt/
+├── HookEntry.java             LSPosed 入口（extends XposedModule）
+├── ShareInterceptor.java      拦截 ClipboardManager.setPrimaryClip
+├── ShareParser.java           只识别「文章口令」
+├── Models.java                抓 ArticleInfoStruct + 作者
+├── Extractor.java             抖音进程内：先存源文件，再跑 AI
+├── AiClient.java              OpenAI 兼容客户端 + 提示词
+├── AiProcessService.java      前台服务：AI + 落盘 + 通知
+├── Notifier.java              通知栏（含「发件」按钮）
+├── ShareReceiverActivity.java 透明 Activity：系统分享接收 / 唤醒通道
+├── ProcessReceiver.java       广播兜底入口
+├── SendActionReceiver.java    「发件」按钮（待接入论坛）
+├── FileSaver.java             落盘 /sdcard/Documents/dyhooktxt/
+├── SharedCfg.java             模块 App ↔ 抖音进程 共享配置
+├── DyLog.java                 独立日志（不依赖 libxposed）
+├── UiCtx.java                 Context / 前台 Activity
+└── MainActivity.java          设置界面
+```
+
+## 构建
+
+需要：JDK 21、Android SDK（compileSdk 37）、Gradle 9.5+
+
+```bash
+export JAVA_HOME=/path/to/jdk-21
+gradle assembleDebug
+```
+
+> ⚠️ LibXposed API 102 要求 **compileSdk 37**，对应 **AGP 9.3.x + Gradle 9.5.1**。
+
+### 打包（关键）
+
+LibXposed 模块的声明文件必须位于 APK 的 `META-INF/xposed/`，AGP 默认不会打进去，
+需要构建后注入并重新签名，见 `tools/package.py`：
+
+```
+META-INF/xposed/java_init.list   → 入口类名
+META-INF/xposed/module.prop      → minApiVersion/targetApiVersion=102
+META-INF/xposed/scope.list       → 作用域
+```
+
+## 安装
+
+1. `adb install DyHook.apk`
+2. LSPosed 里启用模块，作用域勾选 **抖音**
+3. **强制停止抖音再打开**（LSPosed 更新模块后必须重启作用域应用）
+4. 打开模块 App，授予存储权限，按需配置 AI
+
+## 输出
+
+`/sdcard/Documents/dyhooktxt/`
+
+```
+源_20260924_115550_流水线自测_测试作者（12345678）.txt
+青空_流水线自测_测试作者（12345678）by抖音_20260924_115552.txt
+```
+
+成品格式：
+
+```
+标题：流水线自测
+作者：测试作者（12345678）by抖音
+时间：2026-09-24 11:55:52
+来源：抖音文章
+==========
+
+正文……
+```
+
+## 踩过的坑（重要）
+
+### 1. 模块 App 自己的进程里不能用 libxposed 的类
+
+`HookEntry extends io.github.libxposed.api.XposedModule`，这个类**只在被 LSPosed 注入的进程里存在**。
+模块 App 自己的进程没有被注入 —— 一旦在 Activity/Service/Receiver 里引用 `HookEntry`，
+就会：
+
+```
+java.lang.NoClassDefFoundError: Lio/github/libxposed/api/XposedModule;
+  at android.app.AppComponentFactory.instantiateActivity
+```
+
+导致**模块里所有组件都无法实例化**。所以日志必须走独立的 `DyLog`（零 libxposed 依赖）。
+
+### 2. 跨进程唤醒会被 ROM 拦
+
+在加固过的 ROM（如 Flyme）上，抖音进程想唤醒模块 App 会遇到三重拦截：
+
+- `IntentFirewall` 拦跨应用 service 调用（`foreground not allowed as ifw policy[3rd app inter-call]`）
+- 模块 App 被 app freezer 冻结后，广播会被 `BroadcastQueue` 直接跳过
+- 后台启动 Activity 受 BAL 限制
+
+**本项目最终采用的方案：把整个流程寄生在抖音进程里跑**（AI + 落盘 + 通知都在 hook 进程内完成），
+彻底不需要跨进程唤醒。
+
+### 3. 抖音模型字段名
+
+- Java 模型是 camelCase，与接口 JSON 的 snake_case 不同
+- `ArticleInfoStruct` 等模型可能由 Gson/Unsafe 反序列化生成，**不走构造函数**，
+  所以 hook 构造函数抓不到实例，必须**同时 hook 类里所有方法**（任意调用都能拿到 `this`）
+- 字段要在**使用时延迟读取**，构造时往往还是空的
+
+### 4. 明文 HTTP
+
+接本地/内网网关需要 `android:usesCleartextTraffic="true"` +
+`res/xml/network_security_config.xml` 的 `cleartextTrafficPermitted="true"`。
+
+## 许可
+
+MIT

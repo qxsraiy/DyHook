@@ -1,0 +1,29 @@
+# 构建产物
+build/
+app/build/
+*.apk
+*.idsig
+*.aab
+
+# Gradle
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+
+# 本机配置（含 SDK 路径，不要提交）
+local.properties
+.idea/
+*.iml
+
+# 临时/调试文件
+*.db
+*.db.bak
+*.log
+output/
+bin/
+*.zip
+*.xml.bak
+u*.xml
+tt.xml
+oo.xml
+st.xml
+uu.xml
