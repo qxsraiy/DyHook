@@ -260,12 +260,14 @@ public class MainActivity extends Activity {
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(title);
 
-        boolean aiOn = SharedCfg.getBool("ai_enabled", false);
-        String prefix = aiOn ? "青空_" : "源_";
+        // 列表固定显示「洗稿后的成品」（青空_）：
+        // 不管 AI 开关如何，成品都会生成（AI 关时用本地正则清洗）
+        String prefix = "青空_";
 
         TextView sub = new TextView(this);
-        sub.setText("列出 " + prefix + "*.txt（" + (aiOn ? "AI 已开启 → 只显示处理后的成品" : "AI 未开启 → 显示源文件")
-                + "）\n发件成功后文件会被删除，所以「在列表里 = 还没上传」");
+        sub.setText("列出 " + prefix + "*.txt（洗稿后的成品）\n"
+                + "发件成功后文件会被删除，所以「在列表里 = 还没上传」\n"
+                + "点整行可删除（连同源文件），点右侧「发件」直接发到论坛");
         sub.setTextSize(12);
         sub.setTextColor(SUB);
         sub.setLineSpacing(dp(3), 1f);

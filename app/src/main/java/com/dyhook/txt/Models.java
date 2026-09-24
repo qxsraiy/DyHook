@@ -156,29 +156,20 @@ public class Models {
             if (content == null || content.length() < 40) return null;
             try {
                 org.json.JSONObject o = new org.json.JSONObject(content);
-                // 引言 / 备注：抖音把长文章的摘要放在这些 key 里，各版本名字不一
-                a.abstractText = firstNonEmpty(
-                        o.optString("long_article_abstract", null),
-                        o.optString("article_abstract", null),
-                        o.optString("abstract", null),
-                        o.optString("summary", null),
-                        o.optString("digest", null),
-                        o.optString("introduction", null),
-                        o.optString("lead", null),
-                        o.optString("preface", null),
-                        o.optString("desc", null),
-                        o.optString("description", null));
                 a.markdown = o.optString("markdown", null);
                 if (a.markdown == null || a.markdown.isEmpty()) {
+                    // ⚠ 注意：long_article_abstract 是**正文的预览节选**（同一段文字、
+                    //   只是没有空行且被截断），不是摘要。仅在没有 markdown 时才当正文用。
                     a.markdown = o.optString("long_article_abstract", null);
                 }
                 if (a.markdown == null || a.markdown.isEmpty()) a.markdown = content;
-                DyLog.i("[文章] JSON keys=" + keysOf(o)
-                        + " | 引言=" + (a.abstractText == null ? "无"
-                        : a.abstractText.length() + "字"));
+                DyLog.i("[文章] articleContent keys=" + keysOf(o)
+                        + " | 正文=" + a.markdown.length() + "字");
             } catch (Throwable t) {
                 a.markdown = content;
             }
+            // 不再提取「摘要」：抖音没有独立摘要字段，
+            // long_article_abstract 是正文预览，当摘要拼会导致正文重复两遍。
             diag(inst, a.id);
             readAuthor(a);
             return a;

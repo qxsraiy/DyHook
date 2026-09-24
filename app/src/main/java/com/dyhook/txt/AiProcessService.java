@@ -159,20 +159,8 @@ public class AiProcessService extends Service {
                     author = "未知作者";
                 }
                 if (!author.contains("by抖音")) author = author + "by抖音";
-
-                // 引言/备注：放在正文最上面
-                String abs = AiClient.cleanText(abstractText);
-                if (abs != null && !abs.trim().isEmpty()) {
-                    String bodyClean = AiClient.cleanText(content);
-                    // 避免引言本来就是正文开头，重复一遍
-                    if (bodyClean != null && bodyClean.startsWith(abs.trim())) {
-                        content = bodyClean;
-                        DyLog.i("[服务] 引言已包含在正文开头，不重复添加");
-                    } else {
-                        content = abs.trim() + "\n\n" + bodyClean;
-                        DyLog.i("[服务] 已把引言放到正文首行（" + abs.trim().length() + " 字）");
-                    }
-                }
+                // 注意：不再把 long_article_abstract 当摘要拼到正文首行
+                // —— 实测它是正文的预览节选，拼上去会导致正文重复两遍。
             } else {
                 if (aiTitle != null && !aiTitle.trim().isEmpty()) title = aiTitle.trim();
                 if (aiAuthor != null && !aiAuthor.trim().isEmpty()) author = aiAuthor.trim();
