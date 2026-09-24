@@ -33,6 +33,11 @@ public class MainActivity extends Activity {
 
     private LinearLayout root;
     private LinearLayout statusCard;
+    /** 0 = 设置页，1 = 待发件列表页 */
+    private int page = 0;
+    private LinearLayout contentBox;
+    private LinearLayout tabBar;
+    private ScrollView contentScroll;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -46,21 +51,87 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshStatus();
+        if (page == 1) renderFiles();
     }
 
     private View build() {
-        ScrollView sv = new ScrollView(this);
-        sv.setBackgroundColor(BG);
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setBackgroundColor(BG);
+
+        // 内容区
+        contentBox = new LinearLayout(this);
+        contentBox.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams cbp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        contentBox.setLayoutParams(cbp);
+        outer.addView(contentBox);
+
+        // 底栏
+        tabBar = new LinearLayout(this);
+        tabBar.setOrientation(LinearLayout.HORIZONTAL);
+        tabBar.setBackgroundColor(CARD);
+        tabBar.setPadding(0, dp(6), 0, dp(6));
+        outer.addView(tabBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        contentScroll = new ScrollView(this);
+        contentScroll.setBackgroundColor(BG);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(30), dp(16), dp(32));
-        sv.addView(root);
+        contentScroll.addView(root);
+        contentBox.addView(contentScroll);
+
+        buildTabBar();
         render();
-        return sv;
+        return outer;
+    }
+
+    /** 底栏两个图标：设置 / 待发件。 */
+    private void buildTabBar() {
+        tabBar.removeAllViews();
+        tabBar.addView(tabItem("⚙", "设置", 0));
+        tabBar.addView(tabItem("📄", "待发件", 1));
+    }
+
+    private View tabItem(String icon, String label, int idx) {
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER);
+        col.setPadding(0, dp(6), 0, dp(6));
+        col.setLayoutParams(new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        boolean on = (page == idx);
+        TextView ic = new TextView(this);
+        ic.setText(icon);
+        ic.setTextSize(20);
+        ic.setGravity(Gravity.CENTER);
+        ic.setTextColor(on ? ACCENT : SUB);
+        col.addView(ic);
+        TextView tx = new TextView(this);
+        tx.setText(label);
+        tx.setTextSize(11);
+        tx.setGravity(Gravity.CENTER);
+        tx.setTextColor(on ? ACCENT : SUB);
+        col.addView(tx);
+        col.setOnClickListener(v -> {
+            if (page == idx) return;
+            page = idx;
+            buildTabBar();
+            render();
+        });
+        return col;
+    }
+
+    /** 按当前页重建内容。 */
+    private void render() {
+        if (page == 0) renderSettings();
+        else renderFiles();
     }
 
     /** 每次刷新都重建内容，保证配置改动立刻反映。 */
-    private void render() {
+    private void renderSettings() {
         root.removeAllViews();
 
         TextView title = new TextView(this);
@@ -87,6 +158,9 @@ public class MainActivity extends Activity {
         // 基础
         LinearLayout g1 = card();
         g1.addView(switchRow("启用自动提取", "在文章页复制口令后自动解析", "enabled", true));
+        g1.addView(divider());
+        g1.addView(switchRow("自动发件", "解析完直接发到论坛，只用提示条告知成功/失败",
+                "auto_send", false));
         root.addView(g1);
 
         // AI
@@ -131,6 +205,155 @@ public class MainActivity extends Activity {
         foot.setLineSpacing(dp(3), 1f);
         foot.setPadding(dp(6), dp(10), 0, 0);
         root.addView(foot);
+    }
+
+    // ---------- 待发件列表页 ----------
+
+    /** 列出还没发出去的文件（发件成功会删文件，所以「存在 = 未上传」）。 */
+    private void renderFiles() {
+        root.removeAllViews();
+
+        TextView title = new TextView(this);
+        title.setText("待发件");
+        title.setTextSize(22);
+        title.setTextColor(TEXT);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        root.addView(title);
+
+        boolean aiOn = SharedCfg.getBool("ai_enabled", false);
+        String prefix = aiOn ? "青空_" : "源_";
+
+        TextView sub = new TextView(this);
+        sub.setText("列出 " + prefix + "*.txt（" + (aiOn ? "AI 已开启 → 只显示处理后的成品" : "AI 未开启 → 显示源文件")
+                + "）\n发件成功后文件会被删除，所以「在列表里 = 还没上传」");
+        sub.setTextSize(12);
+        sub.setTextColor(SUB);
+        sub.setLineSpacing(dp(3), 1f);
+        sub.setPadding(0, dp(8), 0, dp(14));
+        root.addView(sub);
+
+        java.io.File dir = new java.io.File(FileSaver.OUT_DIR);
+        java.io.File[] all = dir.listFiles();
+        java.util.List<java.io.File> list = new java.util.ArrayList<>();
+        if (all != null) {
+            for (java.io.File f : all) {
+                if (f.isFile() && f.getName().startsWith(prefix)
+                        && f.getName().endsWith(".txt")) {
+                    list.add(f);
+                }
+            }
+        }
+        list.sort((a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+
+        if (list.isEmpty()) {
+            LinearLayout empty = card();
+            TextView t = label("暂无待发件文件", 14, SUB);
+            t.setPadding(dp(16), dp(20), dp(16), dp(20));
+            empty.addView(t);
+            root.addView(empty);
+            return;
+        }
+
+        for (java.io.File f : list) {
+            root.addView(fileRow(f));
+        }
+
+        TextView tip = label("共 " + list.size() + " 个文件", 12, SUB);
+        tip.setPadding(dp(6), dp(12), 0, 0);
+        root.addView(tip);
+    }
+
+    /** 一行：完整标题（可换行不折叠）+ 右侧「发件」按钮。 */
+    private View fileRow(java.io.File f) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.TOP);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(CARD);
+        bg.setCornerRadius(dp(14));
+        row.setBackground(bg);
+        row.setPadding(dp(14), dp(12), dp(10), dp(12));
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rp.bottomMargin = dp(10);
+        row.setLayoutParams(rp);
+
+        // 左侧：标题（完整显示，多行换行）
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        String heading = readTitle(f);
+        TextView t = new TextView(this);
+        t.setText(heading);
+        t.setTextSize(15);
+        t.setTextColor(TEXT);
+        t.setLineSpacing(dp(4), 1f);
+        t.setMaxLines(20);                       // 允许换行，不折叠
+        t.setEllipsize(null);
+        col.addView(t);
+
+        TextView meta = new TextView(this);
+        meta.setText(metaOf(f));
+        meta.setTextSize(11);
+        meta.setTextColor(SUB);
+        meta.setPadding(0, dp(6), 0, 0);
+        col.addView(meta);
+        row.addView(col);
+
+        // 右侧：发件按钮
+        Button b = new Button(this);
+        b.setText("发件");
+        b.setAllCaps(false);
+        b.setTextSize(13);
+        b.setTextColor(Color.WHITE);
+        GradientDrawable bb = new GradientDrawable();
+        bb.setColor(ACCENT);
+        bb.setCornerRadius(dp(18));
+        b.setBackground(bb);
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        b.setPadding(dp(16), dp(6), dp(16), dp(6));
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bp.leftMargin = dp(10);
+        b.setLayoutParams(bp);
+        b.setOnClickListener(v -> {
+            b.setEnabled(false);
+            b.setText("发送中");
+            SendActionReceiver.sendFromUi(this, f.getAbsolutePath());
+            // 稍后刷新列表（成功会删文件）
+            root.postDelayed(this::renderFiles, 6000);
+        });
+        row.addView(b);
+        return row;
+    }
+
+    /** 从文件头读「标题：」，读不到就用文件名。 */
+    private String readTitle(java.io.File f) {
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(f), "UTF-8"))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.startsWith("标题：")) {
+                    String t = line.substring(3).trim();
+                    if (!t.isEmpty()) return t;
+                }
+                if (line.startsWith("==========")) break;
+            }
+        } catch (Throwable ignored) {
+        }
+        String n = f.getName();
+        int dot = n.lastIndexOf('.');
+        return dot > 0 ? n.substring(0, dot) : n;
+    }
+
+    private String metaOf(java.io.File f) {
+        String when = new java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US)
+                .format(new java.util.Date(f.lastModified()));
+        long kb = Math.max(1, f.length() / 1024);
+        return when + "  ·  " + kb + " KB  ·  " + f.getName();
     }
 
     // ---------- 组件 ----------

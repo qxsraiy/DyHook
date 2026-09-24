@@ -93,66 +93,10 @@ public class SendActionReceiver extends BroadcastReceiver {
             return;
         }
 
-        final ForumClient.Cfg cfg = ForumClient.loadCfg();
-        if (!cfg.ready()) {
-            DyLog.w("[发件] 论坛未配置");
-            Notifier.sendFailed(appCtx, notifId, f.getName(),
-                    "未配置论坛，请在模块界面填写地址/账号/密码");
-            return;
-        }
-
-        Notifier.sending(appCtx, notifId, f.getName());
-        cancelDouyinNotif(appCtx, notifId);
-
         final PendingResult pr = goAsync();
         new Thread(() -> {
-            String err = null;
-            ForumClient.Result ok = null;
             try {
-                Parsed p = parse(f);
-                if (p.content == null || p.content.trim().isEmpty()) {
-                    Notifier.sendFailed(appCtx, notifId, f.getName(), "文件内容为空");
-                    return;
-                }
-                String body = buildBody(p);
-                String title = ForumClient.normalizeTitle(p.title);
-                DyLog.i("[发件] 标题=" + title + " | 正文首行=" + firstLine(body));
-
-                // ---- 自动重试：最多 10 次，每次隔 3 秒 ----
-                for (int attempt = 1; attempt <= MAX_TRY; attempt++) {
-                    if (attempt > 1) {
-                        Notifier.retrying(appCtx, notifId, f.getName(), attempt, MAX_TRY);
-                        try {
-                            Thread.sleep(RETRY_DELAY_MS);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
-                    }
-                    ForumClient.Result r = ForumClient.createDiscussion(cfg, title, body);
-                    if (r.ok) {
-                        ok = r;
-                        break;
-                    }
-                    err = r.error;
-                    DyLog.w("[发件] 第 " + attempt + "/" + MAX_TRY + " 次失败: " + err);
-                }
-
-                if (ok != null) {
-                    DyLog.i("[发件] 成功: " + ok.discussionUrl);
-                    // 成功后删除本地的源文件与成品文件
-                    deleteQuietly(f);
-                    if (rawPath != null && !rawPath.isEmpty()) deleteQuietly(new File(rawPath));
-                    Notifier.sent(appCtx, notifId, f.getName(), ok.discussionUrl);
-                } else {
-                    DyLog.e("[发件] 重试 " + MAX_TRY + " 次仍失败: " + err);
-                    Notifier.sendFailed(appCtx, notifId, f.getName(),
-                            (err == null ? "未知错误" : err), path, rawPath);
-                }
-            } catch (Throwable t) {
-                DyLog.e("[发件] 异常: " + t);
-                Notifier.sendFailed(appCtx, notifId, f.getName(),
-                        String.valueOf(t.getMessage()), path, rawPath);
+                doSend(appCtx, path, rawPath, notifId, false);
             } finally {
                 try {
                     pr.finish();
@@ -169,6 +113,166 @@ public class SendActionReceiver extends BroadcastReceiver {
             }
         } catch (Throwable t) {
             DyLog.w("[发件] 删除失败: " + t);
+        }
+    }
+
+    // ==================== 自动发件（静默模式，只用 Toast） ====================
+
+    /**
+     * 从模块界面「待发件」列表手动发件。
+     * 用通知模式，这样能看到重试进度。
+     */
+    public static void sendFromUi(Context ctx, String path) {
+        final Context app = ctx.getApplicationContext();
+        final int notifId = Notifier.newTaskId();
+        final String rawPath = guessRawPath(path);
+        new Thread(() -> {
+            try {
+                doSend(app, path, rawPath, notifId, false);
+            } catch (Throwable t) {
+                DyLog.e("[发件] 界面发件异常: " + t);
+                Notifier.sendFailed(app, notifId, new File(path).getName(),
+                        String.valueOf(t.getMessage()));
+            }
+        }, "dyhook-uisend").start();
+    }
+
+    /** 成品是 青空_标题_作者_时间戳.txt，源文件是 源_时间戳_标题_作者.txt，按标题+时间猜。 */
+    private static String guessRawPath(String namedPath) {
+        try {
+            File named = new File(namedPath);
+            String n = named.getName();
+            if (!n.startsWith("青空_")) return null;
+            String stem = n.substring(3);
+            int dot = stem.lastIndexOf('.');
+            if (dot > 0) stem = stem.substring(0, dot);
+            // 青空_<标题>_<作者>_<时间戳>
+            String[] parts = stem.split("_");
+            if (parts.length < 2) return null;
+            String ts = parts[parts.length - 1];
+            String author = parts.length >= 3 ? parts[parts.length - 2] : "";
+            String title = stem.substring(0, stem.length() - ts.length() - 1
+                    - (author.isEmpty() ? 0 : author.length() + 1));
+            File dir = new File(FileSaver.OUT_DIR);
+            File[] all = dir.listFiles();
+            if (all == null) return null;
+            String want = "源_" + ts + "_" + title;
+            for (File f : all) {
+                if (f.getName().startsWith(want)) return f.getAbsolutePath();
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * 直接发件（自动发件开关打开时调用）。
+     * silent = true：不弹通知，只用 Toast 提示成功/失败。
+     */
+    public static void sendNow(Context ctx, String path, String rawPath, boolean silent) {
+        new Thread(() -> {
+            try {
+                doSend(ctx, path, rawPath, -1, silent);
+            } catch (Throwable t) {
+                DyLog.e("[发件] 自动发件异常: " + t);
+                if (silent) toast(ctx, "❌ 发件失败：" + t.getMessage());
+            }
+        }, "dyhook-autosend").start();
+    }
+
+    /** 核心发件逻辑。notifId < 0 表示静默模式（用 Toast 而非通知）。 */
+    private static void doSend(Context appCtx, String path, String rawPath,
+                               int notifId, boolean silent) {
+        final boolean notify = !silent;
+        File f = new File(path);
+        if (!f.exists()) {
+            fail(appCtx, notifId, notify, f.getName(), "文件不存在", null, null);
+            return;
+        }
+        final ForumClient.Cfg cfg = ForumClient.loadCfg();
+        if (!cfg.ready()) {
+            fail(appCtx, notifId, notify, f.getName(),
+                    "未配置论坛，请在模块界面填写地址/账号/密码", null, null);
+            return;
+        }
+
+        if (notify) {
+            Notifier.sending(appCtx, notifId, f.getName());
+            cancelDouyinNotif(appCtx, notifId);
+        }
+
+        String err = null;
+        ForumClient.Result ok = null;
+        try {
+            Parsed p = parse(f);
+            if (p.content == null || p.content.trim().isEmpty()) {
+                fail(appCtx, notifId, notify, f.getName(), "文件内容为空", path, rawPath);
+                return;
+            }
+            String body = buildBody(p);
+            String title = ForumClient.normalizeTitle(p.title);
+            DyLog.i("[发件] 标题=" + title + " | 正文首行=" + firstLine(body));
+
+            for (int attempt = 1; attempt <= MAX_TRY; attempt++) {
+                if (attempt > 1) {
+                    if (notify) Notifier.retrying(appCtx, notifId, f.getName(), attempt, MAX_TRY);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+                ForumClient.Result r = ForumClient.createDiscussion(cfg, title, body);
+                if (r.ok) {
+                    ok = r;
+                    break;
+                }
+                err = r.error;
+                DyLog.w("[发件] 第 " + attempt + "/" + MAX_TRY + " 次失败: " + err);
+            }
+
+            if (ok != null) {
+                DyLog.i("[发件] 成功: " + ok.discussionUrl);
+                deleteQuietly(f);
+                if (rawPath != null && !rawPath.isEmpty()) deleteQuietly(new File(rawPath));
+                if (notify) {
+                    Notifier.sent(appCtx, notifId, f.getName(), ok.discussionUrl);
+                } else {
+                    toast(appCtx, "✅ 已发件：" + shortTitle(p.title));
+                }
+            } else {
+                DyLog.e("[发件] 重试 " + MAX_TRY + " 次仍失败: " + err);
+                fail(appCtx, notifId, notify, f.getName(),
+                        err == null ? "未知错误" : err, path, rawPath);
+            }
+        } catch (Throwable t) {
+            DyLog.e("[发件] 异常: " + t);
+            fail(appCtx, notifId, notify, f.getName(), String.valueOf(t.getMessage()), path, rawPath);
+        }
+    }
+
+    private static void fail(Context c, int notifId, boolean notify, String fileName,
+                             String reason, String path, String rawPath) {
+        if (notify) {
+            Notifier.sendFailed(c, notifId, fileName, reason, path, rawPath);
+        } else {
+            toast(c, "❌ 发件失败：" + reason + "\n文件已保留，可在模块里手动发");
+        }
+    }
+
+    private static String shortTitle(String t) {
+        if (t == null) return "";
+        String s = t.trim();
+        return s.length() > 18 ? s.substring(0, 18) + "…" : s;
+    }
+
+    private static void toast(Context c, String msg) {
+        try {
+            android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+            h.post(() -> android.widget.Toast.makeText(c, msg,
+                    android.widget.Toast.LENGTH_LONG).show());
+        } catch (Throwable ignored) {
         }
     }
 

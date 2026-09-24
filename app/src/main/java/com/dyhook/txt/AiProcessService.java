@@ -162,13 +162,16 @@ public class AiProcessService extends Service {
 
             String name = new File(path).getName();
             DyLog.i("[服务] 成品已保存: " + path);
-            String msg = name + "（" + content.length() + " 字）"
-                    + "\n源文件：" + new File(rawPath).getName();
-            if (note != null) msg = msg + "\n" + note;
-            // 每个任务一条独立通知：新任务 → 新 ID → 新通知
-            int notifId = Notifier.newTaskId();
-            DyLog.i("[服务] 通知 ID = " + notifId);
-            Notifier.done(ctx, notifId, name, path, rawPath, content.length());
+
+            // 5) 自动发件？
+            if (SharedCfg.getBool("auto_send", false)) {
+                DyLog.i("[服务] 自动发件已开启，直接发件");
+                SendActionReceiver.sendNow(ctx, path, rawPath, true);
+            } else {
+                int notifId = Notifier.newTaskId();
+                DyLog.i("[服务] 通知 ID = " + notifId);
+                Notifier.done(ctx, notifId, name, path, rawPath, content.length());
+            }
         } catch (Throwable t) {
             DyLog.e("[服务] 处理异常: " + t);
             Notifier.fail(ctx, String.valueOf(t.getMessage()));
