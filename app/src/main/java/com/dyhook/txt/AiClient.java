@@ -214,69 +214,145 @@ public class AiClient {
     }
 
     /**
-     * 代码级强制清洗（不依赖 AI 是否听话）。
-     * 解决两类顽固问题：
-     *   1) 残留 HTML 标签（尤其 <br/>）
-     *   2) 会被 Flarum 渲染成「代码框」的内容：
-     *      - ``` 围栏
-     *      - 行首 4 个以上空格 / Tab（markdown 代码块语法）
-     *      - 行内反引号
+     * 代码级强制清洗（纯本地正则，不依赖 AI、不联网）。
+     *
+     * 处理四类问题：
+     *   1) 残留 HTML 标签与实体（尤其 <br/>）
+     *   2) 会被 Flarum 渲染成「代码框」的内容（``` 围栏 / 反引号 / 行首缩进）
+     *   3) 抖音分享口令与引流话术
+     *   4) 排版噪声（零宽字符、重复标点、引号、占位符、多余空格）
      */
     public static String cleanText(String s) {
         if (s == null) return null;
         String t = s;
 
-        // 1) <br> 家族 → 真换行
+        // ---------- 1. HTML 标签 ----------
+        // 1a) <br> 家族 → 真换行
         t = t.replaceAll("(?i)<\\s*br\\s*/?\\s*>", "\n");
-        // 2) 段落标签
-        t = t.replaceAll("(?i)<\\s*/\\s*p\\s*>", "\n\n");
-        t = t.replaceAll("(?i)<\\s*p[^>]*>", "");
-        // 3) 其它常见 HTML 标签整体去掉
-        t = t.replaceAll("(?i)<\\s*/?\\s*(div|span|section|article|header|footer|main|"
-                + "strong|b|em|i|u|s|del|ins|a|img|figure|figcaption|table|thead|tbody|"
-                + "tr|td|th|ul|ol|li|h[1-6]|font|blockquote|hr|pre|code|iframe|video|audio|source)"
+        // 1b) 段落/块级标签 → 换行
+        t = t.replaceAll("(?i)<\\s*/\\s*(p|div|section|article|li|tr|h[1-6]|blockquote)"
+                + "\\s*>", "\n");
+        t = t.replaceAll("(?i)<\\s*(p|div|section|article|li|tr|h[1-6]|blockquote)"
                 + "[^>]*>", "");
-        // 4) 兜底：剩下的尖括号标签也去掉（但保留正文里的数学比较符：只在像标签时删）
-        t = t.replaceAll("<\\s*/?\\s*[a-zA-Z][a-zA-Z0-9]{0,12}(\\s[^>]{0,200})?/?\\s*>", "");
+        // 1c) 其它常见标签整体去掉
+        t = t.replaceAll("(?i)<\\s*/?\\s*(span|strong|b|em|i|u|s|del|ins|a|img|figure|"
+                + "figcaption|table|thead|tbody|td|th|ul|ol|font|hr|pre|code|iframe|"
+                + "video|audio|source|sup|sub|small|mark|abbr|cite|q)\\b[^>]*>", "");
+        // 1d) 兜底：像标签的尖括号结构（保留数学比较符：必须像 <xxx> 或 </xxx>）
+        t = t.replaceAll("<\\s*/?\\s*[a-zA-Z][a-zA-Z0-9]{0,12}(\\s[^<>]{0,200})?/?\\s*>", "");
 
-        // 5) HTML 实体还原
+        // ---------- 2. HTML 实体 ----------
         t = t.replace("&nbsp;", " ").replace("&#160;", " ")
                 .replace("&lt;", "<").replace("&gt;", ">")
                 .replace("&quot;", "\"").replace("&#34;", "\"")
                 .replace("&#39;", "'").replace("&apos;", "'")
                 .replace("&mdash;", "—").replace("&ndash;", "–")
-                .replace("&hellip;", "…").replace("&amp;", "&");
-        // 5b) 数字实体：&#96; / &#x60; 之类
+                .replace("&hellip;", "…").replace("&middot;", "·")
+                .replace("&ldquo;", "“").replace("&rdquo;", "”")
+                .replace("&lsquo;", "‘").replace("&rsquo;", "’")
+                .replace("&amp;", "&");
         t = decodeNumericEntities(t);
 
-        // 6) 去掉 markdown 代码围栏（``` 或 ~~~）
-        t = t.replaceAll("(?m)^[ \\t]*(```|~~~)[a-zA-Z0-9+#-]*[ \\t]*$", "");
-        // 7) 去掉行内反引号（避免出现「可复制的代码块」样式）
+        // ---------- 3. 代码框相关 ----------
+        // 3a) 去掉 markdown 代码围栏（``` 或 ~~~ 整行）
+        t = t.replaceAll("(?m)^[ \\t]*(```|~~~)[a-zA-Z0-9+#._-]*[ \\t]*$", "");
+        // 3b) 去掉行内反引号
         t = t.replace("`", "");
 
-        // 8) 去掉行首 4+ 空格 / Tab —— 这是 markdown 代码块的触发条件
-        String[] lines = t.split("\n", -1);
+        // ---------- 4. 分享口令 / 引流话术（整行删） ----------
+        t = removeNoiseLines(t);
+
+        // ---------- 5. 排版噪声 ----------
+        // 5a) 零宽字符、BOM、控制字符（保留 \n）
+        t = t.replaceAll("[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]", "");
+        t = t.replaceAll("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]", "");
+        // 5b) 占位符（抖音的图片/视频/表情标记）
+        t = t.replaceAll("\\[(图片|视频|动图|表情|音乐|链接|话题|位置|投票|商品|"
+                + "音频|直播|合集|文章)\\]", "");
+        // 5c) 行首缩进（markdown 代码块触发条件）
+        t = stripLeadingIndent(t);
+        // 5d) 行尾空白
+        t = t.replaceAll("(?m)[ \\t]+$", "");
+        // 5e) 省略号先处理（要在重复标点收敛之前，否则 。。。 会先被压成 。）
+        t = t.replace("......", "……").replace("。。。", "……")
+                .replace("···", "……").replace("...", "……");
+        // 5f) 重复标点收敛（省略号已在上一步处理，这里排除连续句点）
+        t = t.replaceAll("[。]{2,}", "。").replaceAll("[，]{2,}", "，")
+                .replaceAll("[！]{2,}", "！").replaceAll("[？]{2,}", "？")
+                .replaceAll("[、]{2,}", "、").replaceAll("[；]{2,}", "；")
+                .replaceAll("[：]{2,}", "：")
+                .replaceAll("……{2,}", "……");
+        // 5g) 引号规范化
+        t = t.replaceAll("\"{2,}", "\"").replaceAll("'{2,}", "'");
+        t = t.replaceAll("\"([^\"\\n]{1,200})\"", "“$1”");
+        t = t.replaceAll("'([^'\\n]{1,200})'", "‘$1’");
+        // 5h) 中文之间的多余空格
+        t = t.replaceAll("([\\u4e00-\\u9fa5])\\s+([\\u4e00-\\u9fa5])", "$1$2");
+
+        // ---------- 6. 收敛空行 ----------
+        t = t.replaceAll("[ \\t]+\\n", "\n");
+        t = t.replaceAll("\\n{3,}", "\n\n");
+        t = t.replaceAll("(?m)^\\s*$\\n(?=\\s*$)", "");
+
+        return t.trim();
+    }
+
+    /** 删掉分享口令、引流话术等噪声整行。 */
+    private static String removeNoiseLines(String s) {
+        // 整行匹配的噪声模式（大小写不敏感）
+        String[] linePatterns = {
+                // 分享口令：2H-:/a :5pm U@L.wS 07/07 …^^xxxx
+                "^\\s*[0-9A-Za-z]{1,4}-?:?/?[0-9A-Za-z:.@/ ]{0,40}\\^\\^[0-9A-Za-z]{4,}\\s*$",
+                "^\\s*\\^\\^[0-9A-Za-z]{4,}\\s*$",
+                // 「长按复制打开抖音，即可阅读文章」
+                ".*长按复制(打开)?抖音.*",
+                ".*复制(此|本)?(链接|口令).*打开抖音.*",
+                ".*复制(打开)?抖音.*",
+                ".*打开抖音(看更多|搜索|app).*",
+                ".*看看【.*的作品】.*",
+                ".*【.*的作品】.*",
+                ".*抖音(搜索|扫一扫|扫一下).*",
+                ".*(关注|点赞|收藏)(我|一下)?(不迷路|哦|吧)?\\s*$",
+                ".*点击(下方|链接).*(查看|阅读|了解).*",
+                ".*(转发|分享)(自|至)?(微博|微信|抖音|头条|小红书).*",
+        };
+        String[] lines = s.split("\n", -1);
         StringBuilder sb = new StringBuilder();
         for (String line : lines) {
             String l = line;
-            if (l.length() > 0) {
-                int i = 0;
-                while (i < l.length() && (l.charAt(i) == ' ' || l.charAt(i) == '\t'
-                        || l.charAt(i) == '\u3000')) {
-                    i++;
+            boolean drop = false;
+            String trimmed = l.trim();
+            if (!trimmed.isEmpty()) {
+                for (String p : linePatterns) {
+                    if (trimmed.matches("(?i)" + p)) {
+                        drop = true;
+                        break;
+                    }
                 }
-                // 全角空格也算缩进，统一去掉
+            }
+            if (!drop) sb.append(l).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** 去掉每行行首的空白（4 个以上空格 / Tab / 全角空格都会触发 markdown 代码块）。 */
+    private static String stripLeadingIndent(String s) {
+        String[] lines = s.split("\n", -1);
+        StringBuilder sb = new StringBuilder();
+        for (String line : lines) {
+            String l = line;
+            if (!l.isEmpty()) {
+                int i = 0;
+                while (i < l.length()) {
+                    char c = l.charAt(i);
+                    if (c == ' ' || c == '\t' || c == '\u3000' || c == '\u00A0') i++;
+                    else break;
+                }
                 l = l.substring(i);
             }
             sb.append(l).append('\n');
         }
-        t = sb.toString();
-
-        // 9) 收敛空行
-        t = t.replaceAll("[ \\t]+\\n", "\n");
-        t = t.replaceAll("\\n{3,}", "\n\n");
-
-        return t.trim();
+        return sb.toString();
     }
 
     /** 解码 &#96; / &#x60; 这类数字实体。 */
