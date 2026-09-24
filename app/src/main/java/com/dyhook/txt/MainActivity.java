@@ -115,8 +115,7 @@ public class MainActivity extends Activity {
         g3.addView(divider());
         g3.addView(forumRow("密码", mask(fc.password), "password", "password", true));
         g3.addView(divider());
-        g3.addView(forumRow("默认标签 slug", fc.tagSlug.isEmpty() ? "gurensi" : fc.tagSlug,
-                "gurensi", "tag_slug", false));
+        g3.addView(forumRow("默认标签 slug", fc.tagSlug, "留空则不带标签", "tag_slug", false));
         g3.addView(divider());
         g3.addView(actionRow("测试论坛登录", "验证地址/账号/密码能否拿到 token", "测试",
                 v -> testForum()));
@@ -414,7 +413,7 @@ public class MainActivity extends Activity {
         dlg.show();
         new Thread(() -> {
             ForumClient.Result r = ForumClient.login(c);
-            String slug = c.tagSlug.isEmpty() ? "gurensi" : c.tagSlug;
+            String slug = c.tagSlug;
             String tagId = r.ok ? ForumClient.findTagId(c, r.token, slug) : null;
             final String msg = r.ok
                     ? "✅ 登录成功\n\n地址：" + c.url + "\n用户ID：" + r.userId

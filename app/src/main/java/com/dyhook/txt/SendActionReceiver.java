@@ -122,14 +122,19 @@ public class SendActionReceiver extends BroadcastReceiver {
         }, "dyhook-send").start();
     }
 
-    /** 组装论坛正文：@作者by抖音 + 换行 + 正文。 */
+    /**
+     * 组装论坛正文：@作者by抖音 + 空 2 行 + 正文。
+     *
+     * 空行用「全角空格行」实现：Flarum 会把 <br> 和 &nbsp; 转义成字面文本，
+     * 而连续换行会被浏览器折叠，只有含全角空格（U+3000）的段落才渲染成真正的空行。
+     */
     private static String buildBody(Parsed p) {
         StringBuilder sb = new StringBuilder();
         String author = p.author == null ? "" : p.author.trim();
         if (!author.isEmpty()) {
             if (!author.startsWith("@")) sb.append('@');
             sb.append(author);
-            sb.append('\n');
+            sb.append("\n\n\u3000\n\n\u3000\n\n");   // 作者名下面空 2 行
         }
         sb.append(p.content);
         return sb.toString();

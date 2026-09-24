@@ -22,7 +22,7 @@ import java.nio.charset.StandardCharsets;
  *      url=https://example.com
  *      username=xxx
  *      password=xxx
- *      tag_slug=your-tag-slug      （可选，默认发到该标签）
+ *      tag_slug=gurensi      （可选，默认发到该标签）
  *      tag_id=15             （可选，填了就不查 slug）
  */
 public class ForumClient {
@@ -150,13 +150,21 @@ public class ForumClient {
         if (!r.ok) return r;
 
         try {
-            // 解析标签
-            String tagId = c.tagId;
-            if (tagId == null || tagId.trim().isEmpty()) {
-                String slug = (c.tagSlug == null || c.tagSlug.trim().isEmpty())
-                        ? "gurensi" : c.tagSlug.trim();
-                tagId = findTagId(c, r.token, slug);
-                DyLog.i("[论坛] 标签 " + slug + " -> id=" + tagId);
+            // 解析标签（默认留空 = 不指定标签，需在模块界面手动填写）
+            String tagId = c.tagId == null ? "" : c.tagId.trim();
+            if (tagId.isEmpty()) {
+                String slug = c.tagSlug == null ? "" : c.tagSlug.trim();
+                if (!slug.isEmpty()) {
+                    tagId = findTagId(c, r.token, slug);
+                    DyLog.i("[论坛] 标签 " + slug + " -> id=" + tagId);
+                    if (tagId == null) {
+                        r.ok = false;
+                        r.error = "找不到标签「" + slug + "」，请在模块界面检查标签 slug";
+                        return r;
+                    }
+                } else {
+                    DyLog.i("[论坛] 未配置标签，将不带标签发帖");
+                }
             }
 
             JSONObject attrs = new JSONObject();

@@ -148,25 +148,41 @@ public class AiClient {
     private static String buildPrompt(String raw, boolean isArticle,
                                       String hintTitle, String hintAuthor) {
         StringBuilder sb = new StringBuilder();
-        sb.append("你是一个文本结构化助手。请阅读下面的【原始文本】，");
-        sb.append("把它整理成结构化数据。\n\n");
+        sb.append("你是一个中文文本整理助手。请阅读下面的【原始文本】，");
+        sb.append("把它整理成结构化数据，并**清洗成正规的书面语言**。\n\n");
         sb.append("【输出要求】\n");
         sb.append("只输出一个 JSON 对象，不要输出任何其它文字，不要用 markdown 代码块包裹。\n");
         sb.append("JSON 必须且只能有这三个字段：\n");
         sb.append("  \"title\"  : 标题。原文有标题就用原文标题；没有就根据正文概括，不超过 30 字。\n");
         sb.append("  \"author\" : 作者或来源。原文里没有明确作者就填空字符串。\n");
-        sb.append("  \"content\": 正文全文。\n\n");
-        sb.append("【content 字段的处理规则】\n");
-        sb.append("1. 完整保留正文内容，不要摘要、不要改写、不要润色、不要翻译。\n");
-        sb.append("2. 去掉这些噪声：分享口令（例如「2H-:/a …^^xxx」）、");
-        sb.append("「复制打开抖音」「长按复制打开抖音」「看看【xxx的作品】」之类的引流话术、");
-        sb.append("多余的空行、首尾空白。\n");
-        sb.append("3. content 里不要再包含标题行、作者行。\n");
-        sb.append("4. 正文里出现的任何符号（#、——、【】、：、引号等）都是正文的一部分，原样保留，");
-        sb.append("不要当成字段分隔符处理。\n");
-        sb.append("5. 绝对不要编造原文中不存在的内容。\n");
-        sb.append("6. title / author 字段里只放标题和作者本身，");
+        sb.append("  \"content\": 清洗后的正文全文。\n\n");
+
+        sb.append("【content 的清洗规则 —— 这是重点，务必执行】\n");
+        sb.append("1. 去掉所有 HTML 标签：<br>、<br/>、<br />、<p>、</p>、<div>、<span>、");
+        sb.append("<a ...>、<img ...>、&nbsp;、&amp;、&lt;、&gt; 等。\n");
+        sb.append("   - <br> 这类换行标签要**转成真正的换行**，不要直接删掉导致文字粘连。\n");
+        sb.append("   - HTML 实体要还原成对应字符（&nbsp;→空格、&amp;→&、&quot;→\"、&lt;→<）。\n");
+        sb.append("2. 修正错误的引号写法：\n");
+        sb.append("   - 连续重复的引号（如 \"\"文字\"\"、''文字''、``文字``）→ 修正成一对中文引号「」或\"\"。\n");
+        sb.append("   - 中英文引号混用、左右引号不配对 → 统一成中文全角引号 \" \" 或 「 」。\n");
+        sb.append("3. 去掉转义残留：正文里出现的字面 \\n、\\t、\\\" 、\\\\ 等要还原成正常字符。\n");
+        sb.append("4. 去掉分享口令与引流话术：\n");
+        sb.append("   「2H-:/a …^^xxxx」「复制打开抖音」「长按复制打开抖音」");
+        sb.append("「看看【xxx的作品】」「打开抖音看更多」之类，整行删掉。\n");
+        sb.append("5. 清理排版：\n");
+        sb.append("   - 合并连续的空行（最多保留一个空行分段）。\n");
+        sb.append("   - 去掉行首行尾多余空格、去掉全角空格。\n");
+        sb.append("   - 修掉被硬折行拆断的句子（同一段落内的换行合成一句）。\n");
+        sb.append("6. 语言规范化（**只做轻度润色，不改原意、不增删信息**）：\n");
+        sb.append("   - 网络用语、错别字、明显笔误 → 改成规范书面表达。\n");
+        sb.append("   - 全角/半角混用、标点缺失 → 按中文标点规范统一。\n");
+        sb.append("   - 不要改变作者的观点、语气与立场，不要摘要、不要扩写。\n");
+        sb.append("7. content 里不要再包含标题行、作者行。\n");
+        sb.append("8. 正文里正常出现的符号（#、——、【】、：、引号等）是正文的一部分，原样保留。\n");
+        sb.append("9. 绝对不要编造原文中不存在的内容。\n");
+        sb.append("10. title / author 字段里只放标题和作者本身，");
         sb.append("不要带括号注释、说明文字、来源标注。\n\n");
+
         sb.append("【JSON 格式要求】\n");
         sb.append("字符串里的换行写成 \\n，双引号写成 \\\"，确保输出是合法 JSON。\n\n");
         if (isArticle) {
