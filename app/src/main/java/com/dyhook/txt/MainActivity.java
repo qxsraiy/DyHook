@@ -106,10 +106,27 @@ public class MainActivity extends Activity {
                 v -> testAi()));
         root.addView(g2);
 
+        // 论坛发件（凭据只存设备本地）
+        ForumClient.Cfg fc = ForumClient.loadCfg();
+        LinearLayout g3 = card();
+        g3.addView(forumRow("论坛地址", fc.url, "https://your-forum.com", "url", false));
+        g3.addView(divider());
+        g3.addView(forumRow("账号", fc.username, "username", "username", false));
+        g3.addView(divider());
+        g3.addView(forumRow("密码", mask(fc.password), "password", "password", true));
+        g3.addView(divider());
+        g3.addView(forumRow("默认标签 slug", fc.tagSlug.isEmpty() ? "gurensi" : fc.tagSlug,
+                "gurensi", "tag_slug", false));
+        g3.addView(divider());
+        g3.addView(actionRow("测试论坛登录", "验证地址/账号/密码能否拿到 token", "测试",
+                v -> testForum()));
+        root.addView(g3);
+
         TextView foot = new TextView(this);
         foot.setText("命名：青空_标题_作者_时间戳.txt\n"
                 + "格式：标题/作者/时间/来源 + 分隔线 + 正文\n"
-                + "位置：/sdcard/Documents/dyhooktxt/");
+                + "位置：/sdcard/Documents/dyhooktxt/\n"
+                + "发件：通知栏「发件」按钮 → 发新讨论贴到论坛");
         foot.setTextSize(11);
         foot.setTextColor(SUB);
         foot.setLineSpacing(dp(3), 1f);
@@ -306,6 +323,105 @@ public class MainActivity extends Activity {
         if (k == null || k.isEmpty()) return "";
         if (k.length() <= 10) return k;
         return k.substring(0, 6) + "…" + k.substring(k.length() - 4);
+    }
+
+    // ---------- 论坛发件（凭据只存设备本地 forum.txt） ----------
+
+    private View forumRow(String t, String val, String hint, String field, boolean secret) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(16), dp(12), dp(12), dp(12));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setLayoutParams(new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        col.addView(label(t, 15, TEXT));
+        String shown = (val == null || val.isEmpty()) ? "未设置" : val;
+        TextView v = label(shown, 12, (val == null || val.isEmpty()) ? SUB : OK);
+        v.setMaxLines(1);
+        v.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        col.addView(v);
+        row.addView(col);
+        Button b = new Button(this);
+        b.setText("设置");
+        b.setAllCaps(false);
+        b.setTextSize(13);
+        b.setTextColor(ACCENT);
+        b.setBackgroundColor(Color.TRANSPARENT);
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        b.setPadding(dp(12), 0, dp(12), 0);
+        b.setOnClickListener(x -> showForumEdit(t, hint, field, secret));
+        row.addView(b);
+        return row;
+    }
+
+    private void showForumEdit(String title, String hint, String field, boolean secret) {
+        ForumClient.Cfg c = ForumClient.loadCfg();
+        EditText et = new EditText(this);
+        et.setHint(hint);
+        et.setSingleLine(true);
+        switch (field) {
+            case "url": et.setText(c.url); break;
+            case "username": et.setText(c.username); break;
+            case "password": et.setText(c.password); break;
+            case "tag_slug": et.setText(c.tagSlug); break;
+            default: break;
+        }
+        if (secret) et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        else et.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setPadding(dp(20), dp(8), dp(20), 0);
+        wrap.addView(et);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(wrap)
+                .setPositiveButton("保存", (d, w) -> {
+                    ForumClient.Cfg cur = ForumClient.loadCfg();
+                    String v = et.getText().toString().trim();
+                    switch (field) {
+                        case "url": cur.url = v; break;
+                        case "username": cur.username = v; break;
+                        case "password": cur.password = v; break;
+                        case "tag_slug": cur.tagSlug = v; break;
+                        default: break;
+                    }
+                    ForumClient.saveCfg(cur);
+                    render();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 测试论坛登录。 */
+    private void testForum() {
+        final ForumClient.Cfg c = ForumClient.loadCfg();
+        if (!c.ready()) {
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle("配置不完整")
+                    .setMessage("请先填写论坛地址 / 账号 / 密码。\n\n凭据只保存在本机：\n"
+                            + ForumClient.CFG_FILE)
+                    .setPositiveButton("好", null).show();
+            return;
+        }
+        final android.app.AlertDialog dlg = new android.app.AlertDialog.Builder(this)
+                .setTitle("测试论坛登录")
+                .setMessage("正在登录…\n\n" + c.url)
+                .setCancelable(false)
+                .setNegativeButton("关闭", null)
+                .create();
+        dlg.show();
+        new Thread(() -> {
+            ForumClient.Result r = ForumClient.login(c);
+            String slug = c.tagSlug.isEmpty() ? "gurensi" : c.tagSlug;
+            String tagId = r.ok ? ForumClient.findTagId(c, r.token, slug) : null;
+            final String msg = r.ok
+                    ? "✅ 登录成功\n\n地址：" + c.url + "\n用户ID：" + r.userId
+                      + "\n默认标签：" + slug + "（id=" + tagId + "）"
+                    : "❌ 登录失败：" + r.error;
+            runOnUiThread(() -> dlg.setMessage(msg));
+        }, "forum-test").start();
     }
 
     private void refreshStatus() {

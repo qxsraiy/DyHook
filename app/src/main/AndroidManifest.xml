@@ -77,10 +77,14 @@
             </intent-filter>
         </receiver>
 
-        <!-- 「发件」按钮 -->
+        <!-- 「发件」按钮：导出以便测试/外部触发，接收器内有路径白名单守卫 -->
         <receiver
             android:name=".SendActionReceiver"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.dyhook.txt.SEND_OUT" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="io.github.libxposed.service.XposedProvider"

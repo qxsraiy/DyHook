@@ -165,7 +165,10 @@ public class AiProcessService extends Service {
             String msg = name + "（" + content.length() + " 字）"
                     + "\n源文件：" + new File(rawPath).getName();
             if (note != null) msg = msg + "\n" + note;
-            Notifier.done(ctx, msg, path, content.length());
+            // 每个任务一条独立通知：新任务 → 新 ID → 新通知
+            int notifId = Notifier.newTaskId();
+            DyLog.i("[服务] 通知 ID = " + notifId);
+            Notifier.done(ctx, notifId, name, path, content.length());
         } catch (Throwable t) {
             DyLog.e("[服务] 处理异常: " + t);
             Notifier.fail(ctx, String.valueOf(t.getMessage()));
