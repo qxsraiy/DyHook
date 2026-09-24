@@ -29,6 +29,13 @@ public class ForumClient {
 
     public static final String CFG_FILE = FileSaver.OUT_DIR + "/forum.txt";
 
+    /**
+     * ⚠ 抖音进程读不到模块创建的 forum.txt（FUSE 沙盒：无存储权限的 App
+     * 只能访问自己创建的文件）→ 会导致自动发件报「未配置论坛」。
+     * 所以再维护一份由抖音创建的 douyin_forum.txt，抖音优先读它。
+     */
+    public static final String CFG_SHARED = SharedCfg.FORUM_SHARED;
+
     public static class Cfg {
         public String url = "";
         public String username = "";
@@ -49,10 +56,23 @@ public class ForumClient {
         public int userId;
     }
 
-    /** 读本地论坛配置。 */
+    /** 读本地论坛配置（优先读抖音创建的那份，抖音进程才读得到）。 */
     public static Cfg loadCfg() {
         Cfg c = new Cfg();
-        File f = new File(CFG_FILE);
+        for (String path : new String[]{CFG_SHARED, CFG_FILE}) {
+            Cfg t = readCfg(path);
+            if (t.ready()) {
+                t.tagSlug = t.tagSlug == null ? "" : t.tagSlug;
+                t.tagId = t.tagId == null ? "" : t.tagId;
+                return t;
+            }
+        }
+        return c;
+    }
+
+    private static Cfg readCfg(String path) {
+        Cfg c = new Cfg();
+        File f = new File(path);
         if (!f.exists()) return c;
         try (BufferedReader br = new BufferedReader(
                 new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8))) {
@@ -72,29 +92,43 @@ public class ForumClient {
                 }
             }
         } catch (Throwable t) {
-            DyLog.w("[论坛] 读配置失败: " + t);
+            DyLog.w("[论坛] 读配置失败(" + path + "): " + t);
         }
         c.url = c.url.replaceAll("/+$", "");
         return c;
     }
 
-    /** 写本地论坛配置（模块界面调用）。 */
+    /** 写本地论坛配置（模块界面调用）：两份都写。 */
     public static void saveCfg(Cfg c) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("url=").append(c.url == null ? "" : c.url.trim()).append('\n');
+        sb.append("username=").append(c.username == null ? "" : c.username.trim()).append('\n');
+        sb.append("password=").append(c.password == null ? "" : c.password.trim()).append('\n');
+        sb.append("tag_slug=").append(c.tagSlug == null ? "" : c.tagSlug.trim()).append('\n');
+        sb.append("tag_id=").append(c.tagId == null ? "" : c.tagId.trim()).append('\n');
+        byte[] data;
         try {
-            File d = new File(FileSaver.OUT_DIR);
-            if (!d.exists()) d.mkdirs();
-            StringBuilder sb = new StringBuilder();
-            sb.append("url=").append(c.url == null ? "" : c.url.trim()).append('\n');
-            sb.append("username=").append(c.username == null ? "" : c.username.trim()).append('\n');
-            sb.append("password=").append(c.password == null ? "" : c.password.trim()).append('\n');
-            sb.append("tag_slug=").append(c.tagSlug == null ? "" : c.tagSlug.trim()).append('\n');
-            sb.append("tag_id=").append(c.tagId == null ? "" : c.tagId.trim()).append('\n');
-            try (OutputStream os = new java.io.FileOutputStream(CFG_FILE)) {
-                os.write(sb.toString().getBytes(StandardCharsets.UTF_8));
-            }
-            DyLog.i("[论坛] 配置已保存到 " + CFG_FILE);
+            data = sb.toString().getBytes(StandardCharsets.UTF_8);
         } catch (Throwable t) {
-            DyLog.e("[论坛] 保存配置失败: " + t);
+            return;
+        }
+        for (String path : new String[]{CFG_FILE, CFG_SHARED}) {
+            File f = new File(path);
+            // 共享那份必须由抖音创建，模块只覆盖内容
+            if (CFG_SHARED.equals(path) && !f.exists()) {
+                DyLog.i("[论坛] 等待抖音创建 " + CFG_SHARED);
+                continue;
+            }
+            try {
+                File d = f.getParentFile();
+                if (d != null && !d.exists()) d.mkdirs();
+                try (OutputStream os = new java.io.FileOutputStream(f)) {
+                    os.write(data);
+                }
+                DyLog.i("[论坛] 配置已写入 " + path);
+            } catch (Throwable t) {
+                DyLog.e("[论坛] 保存配置失败(" + path + "): " + t);
+            }
         }
     }
 

@@ -228,7 +228,9 @@ public class SendActionReceiver extends BroadcastReceiver {
             }
             String body = buildBody(p);
             String title = ForumClient.normalizeTitle(p.title);
-            DyLog.i("[发件] 标题=" + title + " | 正文首行=" + firstLine(body));
+            DyLog.i("[发件] 标题=" + title + " | 正文首行=" + firstLine(body)
+                    + " | 正文长度=" + body.length()
+                    + " | 论坛=" + cfg.url + " | 标签=" + cfg.tagSlug);
 
             for (int attempt = 1; attempt <= MAX_TRY; attempt++) {
                 if (attempt > 1) {
@@ -240,6 +242,7 @@ public class SendActionReceiver extends BroadcastReceiver {
                         break;
                     }
                 }
+                DyLog.i("[发件] 第 " + attempt + " 次尝试…");
                 ForumClient.Result r = ForumClient.createDiscussion(cfg, title, body);
                 if (r.ok) {
                     ok = r;

@@ -86,26 +86,22 @@ public class DyLog {
         } catch (Throwable t) {
             return;
         }
-        // 1) 共享目录
+        // 两份都试着写：
+        //  - dyhook.log        模块创建的，模块进程能写
+        //  - douyin.log        抖音创建的，抖音进程能写
+        // FUSE 沙盒下「无存储权限的 App 只能写自己创建的文件」，
+        // 所以抖音进程的日志只有写 douyin.log 才留得下。
+        appendOne(new File(FileSaver.OUT_DIR, "douyin.log"), bytes);
+        appendOne(new File(FileSaver.OUT_DIR, "dyhook.log"), bytes);
+    }
+
+    private static void appendOne(File f, byte[] bytes) {
         try {
-            File d = new File(FileSaver.OUT_DIR);
-            if (!d.exists()) d.mkdirs();
+            File d = f.getParentFile();
+            if (d != null && !d.exists()) d.mkdirs();
             synchronized (LOCK) {
-                try (FileOutputStream fos = new FileOutputStream(new File(d, "dyhook.log"), true)) {
+                try (FileOutputStream fos = new FileOutputStream(f, true)) {
                     fos.write(bytes);
-                }
-            }
-            return;
-        } catch (Throwable ignored) {
-        }
-        // 2) 兜底：应用私有目录
-        try {
-            String p = privLog();
-            if (p != null) {
-                synchronized (LOCK) {
-                    try (FileOutputStream fos = new FileOutputStream(new File(p), true)) {
-                        fos.write(bytes);
-                    }
                 }
             }
         } catch (Throwable ignored) {

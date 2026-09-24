@@ -43,12 +43,18 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         FileSaver.ensureDirCompat();
-        // 迁移：把配置同时写一份到抖音自己的外部目录，
-        // 这样抖音进程无需任何存储权限就能读到（否则 auto_send/ai_enabled 会读成默认值）
+        // 迁移：把配置同时写一份到抖音创建的共享文件，
+        // 这样抖音进程无需任何存储权限就能读到（否则 auto_send/ai_enabled/论坛凭据 都会读成空）
         try {
             SharedCfg.save(SharedCfg.load());
         } catch (Throwable t) {
-            DyLog.w("同步配置到抖音目录失败: " + t);
+            DyLog.w("同步配置到共享文件失败: " + t);
+        }
+        try {
+            ForumClient.Cfg fc = ForumClient.loadCfg();
+            if (fc.ready()) ForumClient.saveCfg(fc);
+        } catch (Throwable t) {
+            DyLog.w("同步论坛配置到共享文件失败: " + t);
         }
         setContentView(build());
         autoRequestPermissions();

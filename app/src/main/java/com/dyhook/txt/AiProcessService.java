@@ -204,6 +204,10 @@ public class AiProcessService extends Service {
             Notifier.fail(ctx, String.valueOf(t.getMessage()));
         } finally {
             running = false;
+            // 关键：寄生路径没有前台服务来 stopForeground，
+            // 必须显式清掉「AI 分析中…」的进度通知，否则会永远卡在通知栏
+            Notifier.cancelProgress(ctx);
+            DyLog.i("[服务] 任务结束，进度通知已清理");
         }
     }
 

@@ -159,6 +159,19 @@ public class Notifier {
                 reason == null ? "未知错误" : reason, false).build());
     }
 
+    /**
+     * 清掉进度通知。
+     * 寄生路径（抖音进程内直接跑）没有前台服务来 stopForeground，
+     * 必须显式取消，否则会永远卡在「AI 分析中」。
+     */
+    public static void cancelProgress(Context c) {
+        try {
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(PROGRESS_ID);
+        } catch (Throwable ignored) {
+        }
+    }
+
     private static void post(Context c, int id, Notification n) {
         try {
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);

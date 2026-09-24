@@ -31,6 +31,12 @@ public class SharedCfg {
     /** 由抖音进程创建、双方都能访问的配置文件。 */
     public static final String FILE_SHARED = FileSaver.OUT_DIR + "/douyin_cfg.txt";
 
+    /** 由抖音进程创建、双方都能写的日志文件（抖音进程的日志只有写这里才留得下）。 */
+    public static final String LOG_SHARED = FileSaver.OUT_DIR + "/douyin.log";
+
+    /** 由抖音进程创建、双方都能访问的论坛配置（否则抖音进程读不到论坛凭据）。 */
+    public static final String FORUM_SHARED = FileSaver.OUT_DIR + "/douyin_forum.txt";
+
     private static String[] files() {
         return new String[]{FILE_SHARED, FILE};
     }
@@ -104,6 +110,18 @@ public class SharedCfg {
             if (!f.exists()) {
                 boolean ok = f.createNewFile();
                 DyLog.i("创建 " + FILE_SHARED + " -> " + ok);
+            }
+            // 日志文件也必须由抖音创建，否则抖音进程写不进去（FUSE 沙盒）
+            File lg = new File(LOG_SHARED);
+            if (!lg.exists()) {
+                boolean ok2 = lg.createNewFile();
+                DyLog.i("创建 " + LOG_SHARED + " -> " + ok2);
+            }
+            // 论坛凭据同理：抖音进程要读它才知道往哪发
+            File ff = new File(FORUM_SHARED);
+            if (!ff.exists()) {
+                boolean ok3 = ff.createNewFile();
+                DyLog.i("创建 " + FORUM_SHARED + " -> " + ok3);
             }
             return f.exists() && f.canRead();
         } catch (Throwable t) {
