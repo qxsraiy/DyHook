@@ -23,6 +23,9 @@ public class AiProcessService extends Service {
     public static final String SRC_ARTICLE = "article";
     public static final String SRC_PERSONAL = "personal";
 
+    /** 文章引言/备注，要作为正文首行。 */
+    public static final String EXTRA_ABSTRACT = "abstract";
+
     private static volatile boolean running = false;
 
     @Override
@@ -41,6 +44,7 @@ public class AiProcessService extends Service {
         String hintTitle = intent.getStringExtra(EXTRA_TITLE);
         String hintAuthor = intent.getStringExtra(EXTRA_AUTHOR);
         String rawPath = intent.getStringExtra(ProcessReceiver.EXTRA_RAWPATH);
+        String abstractText = intent.getStringExtra(EXTRA_ABSTRACT);
         if (source == null) source = SRC_PERSONAL;
 
         if (text == null || text.trim().isEmpty()) {
@@ -63,10 +67,11 @@ public class AiProcessService extends Service {
         }
 
         final String fText = text.trim(), fSource = source,
-                fTitle = hintTitle, fAuthor = hintAuthor, fRaw = rawPath;
+                fTitle = hintTitle, fAuthor = hintAuthor, fRaw = rawPath,
+                fAbs = abstractText;
         new Thread(() -> {
             try {
-                run(this, fText, fSource, fTitle, fAuthor, fRaw);
+                run(this, fText, fSource, fTitle, fAuthor, fRaw, fAbs);
             } finally {
                 try {
                     stopForeground(true);
@@ -82,6 +87,13 @@ public class AiProcessService extends Service {
     /** 实际处理逻辑（服务 / 抖音进程内直接调用 / 兜底线程共用）。 */
     public static void run(Context ctx, String raw, String source,
                            String hintTitle, String hintAuthor, String rawPath) {
+        run(ctx, raw, source, hintTitle, hintAuthor, rawPath, null);
+    }
+
+    /** 实际处理逻辑（带引言）。 */
+    public static void run(Context ctx, String raw, String source,
+                           String hintTitle, String hintAuthor, String rawPath,
+                           String abstractText) {
         if (running) {
             DyLog.w("[服务] 已有任务在跑，忽略本次");
             return;
@@ -147,6 +159,20 @@ public class AiProcessService extends Service {
                     author = "未知作者";
                 }
                 if (!author.contains("by抖音")) author = author + "by抖音";
+
+                // 引言/备注：放在正文最上面
+                String abs = AiClient.cleanText(abstractText);
+                if (abs != null && !abs.trim().isEmpty()) {
+                    String bodyClean = AiClient.cleanText(content);
+                    // 避免引言本来就是正文开头，重复一遍
+                    if (bodyClean != null && bodyClean.startsWith(abs.trim())) {
+                        content = bodyClean;
+                        DyLog.i("[服务] 引言已包含在正文开头，不重复添加");
+                    } else {
+                        content = abs.trim() + "\n\n" + bodyClean;
+                        DyLog.i("[服务] 已把引言放到正文首行（" + abs.trim().length() + " 字）");
+                    }
+                }
             } else {
                 if (aiTitle != null && !aiTitle.trim().isEmpty()) title = aiTitle.trim();
                 if (aiAuthor != null && !aiAuthor.trim().isEmpty()) author = aiAuthor.trim();

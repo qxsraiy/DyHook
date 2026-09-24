@@ -37,6 +37,16 @@ public class HookEntry extends XposedModule {
         } catch (Throwable t) {
             log(Log.WARN, TAG, "注册取消通知接收器失败: " + t);
         }
+        // 关键：由抖音进程创建共享配置文件，这样抖音自己永远能读
+        // （FUSE 沙盒：无存储权限的 App 只能访问自己创建的文件）
+        try {
+            boolean ok = SharedCfg.ensureSharedFile();
+            log(Log.INFO, TAG, "共享配置文件可用=" + ok
+                    + "  auto_send=" + SharedCfg.getBool("auto_send", false)
+                    + "  ai_enabled=" + SharedCfg.getBool("ai_enabled", false));
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "创建共享配置失败: " + t);
+        }
         try {
             ShareInterceptor.install(this, param.getClassLoader());
             log(Log.INFO, TAG, "ShareInterceptor 安装完成");

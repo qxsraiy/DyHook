@@ -28,6 +28,8 @@ public class Models {
         public String id;
         public String title;
         public String markdown;
+        /** 引言 / 摘要 / 备注（如果有），要放在正文最上面 */
+        public String abstractText;
         public String authorName;
         public String authorId;
     }
@@ -154,11 +156,26 @@ public class Models {
             if (content == null || content.length() < 40) return null;
             try {
                 org.json.JSONObject o = new org.json.JSONObject(content);
+                // 引言 / 备注：抖音把长文章的摘要放在这些 key 里，各版本名字不一
+                a.abstractText = firstNonEmpty(
+                        o.optString("long_article_abstract", null),
+                        o.optString("article_abstract", null),
+                        o.optString("abstract", null),
+                        o.optString("summary", null),
+                        o.optString("digest", null),
+                        o.optString("introduction", null),
+                        o.optString("lead", null),
+                        o.optString("preface", null),
+                        o.optString("desc", null),
+                        o.optString("description", null));
                 a.markdown = o.optString("markdown", null);
                 if (a.markdown == null || a.markdown.isEmpty()) {
                     a.markdown = o.optString("long_article_abstract", null);
                 }
                 if (a.markdown == null || a.markdown.isEmpty()) a.markdown = content;
+                DyLog.i("[文章] JSON keys=" + keysOf(o)
+                        + " | 引言=" + (a.abstractText == null ? "无"
+                        : a.abstractText.length() + "字"));
             } catch (Throwable t) {
                 a.markdown = content;
             }
@@ -371,6 +388,22 @@ public class Models {
             if (s != null && !s.trim().isEmpty() && !"null".equals(s)) return s.trim();
         }
         return null;
+    }
+
+    /** 列出 JSON 的顶层 key，便于确认摘要字段叫什么。 */
+    private static String keysOf(org.json.JSONObject o) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                if (sb.length() > 0) sb.append(',');
+                sb.append(it.next());
+            }
+            String s = sb.toString();
+            return s.length() > 200 ? s.substring(0, 200) + "…" : s;
+        } catch (Throwable t) {
+            return "?";
+        }
     }
 
     static String readField(Object o, String name) {
