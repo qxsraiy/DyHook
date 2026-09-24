@@ -144,6 +144,25 @@ public class ForumClient {
         return null;
     }
 
+    /**
+     * 标题规范化。
+     * Flarum 要求标题至少 3 个字符（否则 422 validation_error），
+     * 这里做兜底，避免因为短标题整个发帖失败。
+     */
+    public static String normalizeTitle(String t) {
+        String s = (t == null) ? "" : t.trim();
+        s = s.replaceAll("[\\r\\n]+", " ").replaceAll("\\s+", " ").trim();
+        if (s.isEmpty()) return "未命名文章";
+        int len = s.codePointCount(0, s.length());
+        if (len < 3) {
+            StringBuilder sb = new StringBuilder(s);
+            while (sb.toString().codePointCount(0, sb.length()) < 3) sb.append('文');
+            s = sb.toString();
+        }
+        if (s.length() > 80) s = s.substring(0, 80);
+        return s;
+    }
+
     /** 发新讨论贴。 */
     public static Result createDiscussion(Cfg c, String title, String content) {
         Result r = login(c);
@@ -168,7 +187,7 @@ public class ForumClient {
             }
 
             JSONObject attrs = new JSONObject();
-            attrs.put("title", title == null ? "无标题" : title);
+            attrs.put("title", normalizeTitle(title));
             attrs.put("content", content == null ? "" : content);
 
             JSONObject data = new JSONObject();

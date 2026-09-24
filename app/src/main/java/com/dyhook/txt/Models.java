@@ -167,21 +167,43 @@ public class Models {
         }
     }
 
-    /** 从 ArticleDetailInfo -> aweme -> author 里读昵称和抖音号；兜底扫 Aweme 列表。 */
+    /**
+     * 读作者。
+     *
+     * ⚠ 关键：绝不能「随便挑一个缓存的 Aweme」兜底 —— 那会把作者串成上一条
+     * 看过的视频/文章。只认两种来源：
+     *   1) ArticleDetailInfo.aweme（它就是当前文章的详情）
+     *   2) awemeList 里 articleInfo.articleId == 当前文章 id 的那个
+     * 都找不到就留空，宁缺毋滥。
+     */
     private static void readAuthor(ArticleInfo a) {
+        // 1) 当前文章的详情对象
         Object det = detailInst;
         if (det != null) {
             Object aweme = readFieldObj(det, "aweme");
             if (aweme != null && fillAuthorFromAweme(a, aweme)) return;
         }
-        synchronized (awemeList) {
-            for (Object aweme : awemeList) {
-                if (readFieldObj(aweme, "articleInfo") != null && fillAuthorFromAweme(a, aweme)) return;
-            }
-            for (Object aweme : awemeList) {
-                if (fillAuthorFromAweme(a, aweme)) return;
+        // 2) 缓存里 articleId 与当前文章一致的
+        if (a.id != null && !a.id.isEmpty()) {
+            synchronized (awemeList) {
+                for (Object aweme : awemeList) {
+                    if (sameArticle(aweme, a.id) && fillAuthorFromAweme(a, aweme)) return;
+                }
             }
         }
+        // 3) 不再兜底 —— 宁可没有作者，也不要错的作者
+        DyLog.w("[作者] 未找到与当前文章匹配的作者，留空（避免串到上一条）");
+    }
+
+    /** 这个 Aweme 是不是当前这篇文章。 */
+    private static boolean sameArticle(Object aweme, String articleId) {
+        if (aweme == null || articleId == null || articleId.isEmpty()) return false;
+        Object ai = readFieldObj(aweme, "articleInfo");
+        if (ai != null) {
+            String id = firstNonEmpty(readField(ai, "articleId"), readField(ai, "article_id"));
+            if (articleId.equals(id)) return true;
+        }
+        return false;
     }
 
     private static boolean fillAuthorFromAweme(ArticleInfo a, Object aweme) {

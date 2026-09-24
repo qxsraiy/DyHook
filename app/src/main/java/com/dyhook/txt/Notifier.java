@@ -12,11 +12,11 @@ import android.os.Build;
  * 模块通知栏。
  *
  * 设计：**每个任务一个独立通知 ID**，状态在同一通知上流转：
- *   已完成（带「发件」按钮）
+ *   解析完成（带「发件」按钮）
  *      ↓ 点发件
  *   发件中…（按钮消失）
  *      ↓
- *   发件成功 / 发件失败
+ *   发件成功 / 发件失败（带「重试」按钮）
  * 下一个任务用新的 ID → 新通知，旧通知保留作记录。
  */
 public class Notifier {
@@ -27,7 +27,6 @@ public class Notifier {
     private static final int BASE = 2000;
     private static volatile int lastId = BASE;
 
-    /** 生成一个新任务的通知 ID。 */
     public static synchronized int newTaskId() {
         int id = BASE + (int) (System.currentTimeMillis() / 1000 % 100000);
         if (id <= lastId) id = lastId + 1;
@@ -65,23 +64,31 @@ public class Notifier {
         return b;
     }
 
-    // ---------- 状态 1：解析完成，带「发件」按钮 ----------
-
-    public static void done(Context c, int notifId, String fileName, String filePath, int chars) {
-        ensureChannel(c);
-
-        Intent send = new Intent();
-        send.setClassName("com.dyhook.txt", "com.dyhook.txt.SendActionReceiver");
-        send.setAction(SendActionReceiver.ACTION_SEND_OUT);
-        send.putExtra("path", filePath);
-        send.putExtra("notif_id", notifId);      // 让它回来更新同一条通知
+    private static int piFlags() {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
-        PendingIntent pi = PendingIntent.getBroadcast(c, notifId, send, flags);
+        return flags;
+    }
 
+    private static PendingIntent sendPi(Context c, int notifId, String path, String rawPath) {
+        Intent i = new Intent();
+        i.setClassName("com.dyhook.txt", "com.dyhook.txt.SendActionReceiver");
+        i.setAction(SendActionReceiver.ACTION_SEND_OUT);
+        i.putExtra("path", path);
+        i.putExtra("rawpath", rawPath);
+        i.putExtra("notif_id", notifId);
+        return PendingIntent.getBroadcast(c, notifId, i, piFlags());
+    }
+
+    // ---------- 状态 1：解析完成，带「发件」按钮 ----------
+
+    public static void done(Context c, int notifId, String fileName, String filePath,
+                            String rawPath, int chars) {
+        ensureChannel(c);
         Notification n = base(c, "✅ 解析完成", fileName + "（" + chars + " 字）", false)
                 .addAction(new Notification.Action.Builder(
-                        android.R.drawable.ic_menu_send, "发件", pi).build())
+                        android.R.drawable.ic_menu_send, "发件",
+                        sendPi(c, notifId, filePath, rawPath)).build())
                 .build();
         post(c, notifId, n);
     }
@@ -93,6 +100,13 @@ public class Notifier {
         post(c, notifId, base(c, "📤 发件中…", fileName, true).build());
     }
 
+    /** 发件中（带重试计数）。 */
+    public static void retrying(Context c, int notifId, String fileName, int attempt, int max) {
+        ensureChannel(c);
+        post(c, notifId, base(c, "📤 发件中…", fileName
+                + "\n第 " + attempt + "/" + max + " 次尝试…", true).build());
+    }
+
     // ---------- 状态 3：发件成功 ----------
 
     public static void sent(Context c, int notifId, String fileName, String url) {
@@ -100,12 +114,25 @@ public class Notifier {
         post(c, notifId, base(c, "✅ 发件成功", fileName + "\n" + url, false).build());
     }
 
-    // ---------- 状态 3'：发件失败 ----------
+    // ---------- 状态 3'：发件失败（带「重试」按钮） ----------
 
-    public static void sendFailed(Context c, int notifId, String fileName, String reason) {
+    public static void sendFailed(Context c, int notifId, String fileName, String reason,
+                                  String path, String rawPath) {
         ensureChannel(c);
-        post(c, notifId, base(c, "❌ 发件失败",
-                fileName + "\n" + (reason == null ? "未知错误" : reason), false).build());
+        Notification.Builder b = base(c, "❌ 发件失败（已重试仍失败）",
+                fileName + "\n" + (reason == null ? "未知错误" : reason)
+                        + "\n文件已保留，可点「重试」再发。", false);
+        if (path != null && !path.isEmpty()) {
+            b.addAction(new Notification.Action.Builder(
+                    android.R.drawable.ic_menu_rotate, "重试",
+                    sendPi(c, notifId, path, rawPath)).build());
+        }
+        post(c, notifId, b.build());
+    }
+
+    /** 无文件可重试的失败（配置错误等）。 */
+    public static void sendFailed(Context c, int notifId, String fileName, String reason) {
+        sendFailed(c, notifId, fileName, reason, null, null);
     }
 
     // ---------- 解析进度（前台服务用，固定 ID） ----------
@@ -125,7 +152,7 @@ public class Notifier {
         }
     }
 
-    /** 解析失败（独立提示）。 */
+    /** 解析失败。 */
     public static void fail(Context c, String reason) {
         ensureChannel(c);
         post(c, PROGRESS_ID, base(c, "❌ 解析失败",

@@ -33,6 +33,11 @@ public class HookEntry extends XposedModule {
             return;
         }
         try {
+            installNotifCancelReceiver();
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "注册取消通知接收器失败: " + t);
+        }
+        try {
             ShareInterceptor.install(this, param.getClassLoader());
             log(Log.INFO, TAG, "ShareInterceptor 安装完成");
         } catch (Throwable t) {
@@ -45,4 +50,36 @@ public class HookEntry extends XposedModule {
             log(Log.ERROR, TAG, "Models 安装失败", t);
         }
     }
+
+    /**
+     * 在抖音进程里注册一个接收器：
+     * 模块点「发件」后会广播过来，让抖音把自己发的那条「解析完成」通知撤掉，
+     * 这样通知栏上只留模块自己发的那一条。
+     */
+    private void installNotifCancelReceiver() {
+        final android.content.Context ctx = UiCtx.context();
+        if (ctx == null) return;
+        android.content.IntentFilter f = new android.content.IntentFilter(CANCEL_NOTIF_ACTION);
+        ctx.registerReceiver(new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(android.content.Context c, android.content.Intent i) {
+                if (i == null) return;
+                int id = i.getIntExtra("notif_id", -1);
+                if (id < 0) return;
+                try {
+                    android.app.NotificationManager nm =
+                            (android.app.NotificationManager) c.getSystemService(
+                                    android.content.Context.NOTIFICATION_SERVICE);
+                    if (nm != null) nm.cancel(id);
+                    DyLog.i("[通知] 已撤掉抖音侧通知 id=" + id);
+                } catch (Throwable t) {
+                    DyLog.w("[通知] 撤销失败: " + t);
+                }
+            }
+        }, f);
+        log(Log.INFO, TAG, "通知撤销接收器已注册");
+    }
+
+    /** 模块 -> 抖音：请撤掉指定 id 的通知。 */
+    public static final String CANCEL_NOTIF_ACTION = "com.dyhook.txt.CANCEL_NOTIF";
 }

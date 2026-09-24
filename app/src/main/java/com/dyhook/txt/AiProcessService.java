@@ -168,7 +168,7 @@ public class AiProcessService extends Service {
             // 每个任务一条独立通知：新任务 → 新 ID → 新通知
             int notifId = Notifier.newTaskId();
             DyLog.i("[服务] 通知 ID = " + notifId);
-            Notifier.done(ctx, notifId, name, path, content.length());
+            Notifier.done(ctx, notifId, name, path, rawPath, content.length());
         } catch (Throwable t) {
             DyLog.e("[服务] 处理异常: " + t);
             Notifier.fail(ctx, String.valueOf(t.getMessage()));
