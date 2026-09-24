@@ -21,6 +21,7 @@ public class Models {
 
     private static volatile Object articleInst;
     private static volatile Object detailInst;
+    private static volatile Object respInst;
     private static final java.util.LinkedList<Object> awemeList = new java.util.LinkedList<>();
 
     public static class ArticleInfo {
@@ -36,6 +37,8 @@ public class Models {
                 inst -> articleInst = inst, "ArticleInfoStruct");
         hookClass(module, cl, "com.ss.android.ugc.aweme.searcharticle.detail.model.ArticleDetailInfo",
                 inst -> detailInst = inst, "ArticleDetailInfo");
+        hookClass(module, cl, "com.ss.android.ugc.aweme.feed.search_article.api.ArticleDetailResponse",
+                inst -> respInst = inst, "ArticleDetailResponse");
         hookAwemeAuthor(module, cl);
     }
 
@@ -159,6 +162,7 @@ public class Models {
             } catch (Throwable t) {
                 a.markdown = content;
             }
+            diag(inst, a.id);
             readAuthor(a);
             return a;
         } catch (Throwable t) {
@@ -167,32 +171,161 @@ public class Models {
         }
     }
 
+    /** 诊断：一次真机测试就能看出作者藏在哪个源里。 */
+    private static void diag(Object inst, String articleId) {
+        try {
+            StringBuilder sb = new StringBuilder("[作者诊断] articleId=" + articleId);
+            sb.append(" | ArticleInfoStruct=").append(articleInst != null ? "有" : "无");
+            sb.append(" | DetailInfo=").append(detailInst != null ? "有" : "无");
+            sb.append(" | Response=").append(respInst != null ? "有" : "无");
+            synchronized (awemeList) {
+                sb.append(" | Aweme缓存=").append(awemeList.size());
+                int match = 0;
+                for (Object w : awemeList) if (sameArticle(w, articleId)) match++;
+                sb.append("(匹配 ").append(match).append(")");
+            }
+            // JSON 字段是否有内容
+            String fe = readField(inst, "feData");
+            String ex = readField(inst, "articleExtra");
+            sb.append(" | feData=").append(fe == null ? 0 : fe.length());
+            sb.append(" | articleExtra=").append(ex == null ? 0 : ex.length());
+            DyLog.i(sb.toString());
+
+            // 若 JSON 有内容，把可能的作者 key 打出来
+            for (String j : new String[]{fe, ex}) {
+                if (j == null || j.length() < 10) continue;
+                String name = pickJson(j, new String[]{"nickname", "nick_name", "author_name",
+                        "authorName", "user_name", "userName", "author_nickname"});
+                String id = pickJson(j, new String[]{"unique_id", "uniqueId", "short_id",
+                        "shortId", "sec_uid", "secUid"});
+                if (name != null || id != null) {
+                    DyLog.i("[作者诊断] JSON 里找到 name=" + name + " id=" + id);
+                }
+            }
+        } catch (Throwable t) {
+            DyLog.w("[作者诊断] 失败: " + t);
+        }
+    }
+
     /**
-     * 读作者。
+     * 读作者。**四级兜底，目标：必须拿到作者名**。
      *
-     * ⚠ 关键：绝不能「随便挑一个缓存的 Aweme」兜底 —— 那会把作者串成上一条
-     * 看过的视频/文章。只认两种来源：
-     *   1) ArticleDetailInfo.aweme（它就是当前文章的详情）
-     *   2) awemeList 里 articleInfo.articleId == 当前文章 id 的那个
-     * 都找不到就留空，宁缺毋滥。
+     * 1) ArticleDetailInfo.aweme.author（当前文章的详情对象）
+     * 2) ArticleDetailResponse.d（API 响应里的 Aweme）
+     * 3) awemeList 里 articleInfo.articleId 与当前文章一致的 Aweme
+     * 4) ArticleInfoStruct 里的 articleExtra / feData JSON（Lynx 前端数据，常带作者）
+     *
+     * 前三级要求 articleId 匹配，避免串到上一条；第 4 级只看当前文章自己的字段。
      */
     private static void readAuthor(ArticleInfo a) {
-        // 1) 当前文章的详情对象
+        // 1) ArticleDetailInfo.aweme
         Object det = detailInst;
         if (det != null) {
             Object aweme = readFieldObj(det, "aweme");
-            if (aweme != null && fillAuthorFromAweme(a, aweme)) return;
+            if (aweme != null && fillAuthorFromAweme(a, aweme)) {
+                DyLog.i("[作者] 来源=ArticleDetailInfo");
+                return;
+            }
         }
-        // 2) 缓存里 articleId 与当前文章一致的
+        // 2) ArticleDetailResponse.d
+        Object resp = respInst;
+        if (resp != null) {
+            Object aweme = readFieldObj(resp, "d");
+            if (aweme == null) aweme = readFieldObj(resp, "aweme");
+            if (aweme != null && fillAuthorFromAweme(a, aweme)) {
+                DyLog.i("[作者] 来源=ArticleDetailResponse");
+                return;
+            }
+        }
+        // 3) 缓存里 articleId 严格一致的 Aweme
         if (a.id != null && !a.id.isEmpty()) {
             synchronized (awemeList) {
                 for (Object aweme : awemeList) {
-                    if (sameArticle(aweme, a.id) && fillAuthorFromAweme(a, aweme)) return;
+                    if (sameArticle(aweme, a.id) && fillAuthorFromAweme(a, aweme)) {
+                        DyLog.i("[作者] 来源=Aweme 缓存(articleId 严格匹配)");
+                        return;
+                    }
                 }
             }
         }
-        // 3) 不再兜底 —— 宁可没有作者，也不要错的作者
-        DyLog.w("[作者] 未找到与当前文章匹配的作者，留空（避免串到上一条）");
+        // 4) 缓存里「带 articleInfo 的 Aweme」——只认文章类，绝不碰视频
+        //    （这一层是之前能拿到作者的关键路径，不能砍）
+        synchronized (awemeList) {
+            for (Object aweme : awemeList) {
+                if (readFieldObj(aweme, "articleInfo") != null
+                        && fillAuthorFromAweme(a, aweme)) {
+                    DyLog.i("[作者] 来源=Aweme 缓存(文章类，含 articleInfo)");
+                    return;
+                }
+            }
+        }
+        // 5) 当前文章自己的 JSON 字段（articleExtra / feData）
+        Object inst = articleInst;
+        if (inst != null) {
+            String[] jsons = {readField(inst, "feData"), readField(inst, "articleExtra")};
+            String[] keys = {"nickname", "nick_name", "author_name", "authorName",
+                    "unique_id", "uniqueId", "short_id", "shortId", "sec_uid", "secUid",
+                    "user_name", "userName", "author_nickname"};
+            for (String j : jsons) {
+                if (j == null || j.length() < 10) continue;
+                String name = pickJson(j, new String[]{"nickname", "nick_name", "author_name",
+                        "authorName", "user_name", "userName", "author_nickname"});
+                String id = pickJson(j, new String[]{"unique_id", "uniqueId", "short_id",
+                        "shortId", "sec_uid", "secUid"});
+                if (name != null || id != null) {
+                    a.authorName = name;
+                    a.authorId = id;
+                    DyLog.i("[作者] 来源=JSON 字段 name=" + name + " id=" + id);
+                    return;
+                }
+            }
+        }
+        DyLog.w("[作者] 四级兜底都没拿到作者，留空（避免串到上一条）");
+    }
+
+    /**
+     * 从 JSON 字符串里按 key 名字找第一个非空字符串值。
+     * 不依赖固定结构，递归扫（抖音的 feData 结构经常变）。
+     */
+    private static String pickJson(String json, String[] keys) {
+        try {
+            Object o = new org.json.JSONTokener(json).nextValue();
+            return findKey(o, keys, 0);
+        } catch (Throwable t) {
+            // 不是合法 JSON，退回正则粗扫
+            for (String k : keys) {
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("\"" + k + "\"\\s*:\\s*\"([^\"]{1,60})\"").matcher(json);
+                if (m.find()) {
+                    String v = m.group(1).trim();
+                    if (!v.isEmpty() && !"null".equals(v)) return v;
+                }
+            }
+            return null;
+        }
+    }
+
+    private static String findKey(Object o, String[] keys, int depth) {
+        if (o == null || depth > 12) return null;
+        if (o instanceof org.json.JSONObject) {
+            org.json.JSONObject jo = (org.json.JSONObject) o;
+            for (String k : keys) {
+                String v = jo.optString(k, null);
+                if (v != null && !v.trim().isEmpty() && !"null".equals(v)) return v.trim();
+            }
+            java.util.Iterator<String> it = jo.keys();
+            while (it.hasNext()) {
+                String r = findKey(jo.opt(it.next()), keys, depth + 1);
+                if (r != null) return r;
+            }
+        } else if (o instanceof org.json.JSONArray) {
+            org.json.JSONArray ja = (org.json.JSONArray) o;
+            for (int i = 0; i < ja.length(); i++) {
+                String r = findKey(ja.opt(i), keys, depth + 1);
+                if (r != null) return r;
+            }
+        }
+        return null;
     }
 
     /** 这个 Aweme 是不是当前这篇文章。 */
@@ -206,18 +339,27 @@ public class Models {
         return false;
     }
 
+    /** 从 Aweme 里挖作者：多种字段名 + 嵌套结构都试。 */
     private static boolean fillAuthorFromAweme(ArticleInfo a, Object aweme) {
         Object author = readFieldObj(aweme, "author");
+        if (author == null) author = readFieldObj(aweme, "authorUser");
+        if (author == null) author = readFieldObj(aweme, "user");
         if (author == null) return false;
+
         String name = firstNonEmpty(
                 readField(author, "nickname"),
                 readField(author, "nickName"),
+                readField(author, "nick_name"),
+                readField(author, "displayName"),
+                readField(author, "name"),
                 readField(author, "uniqueId"));
         String id = firstNonEmpty(
                 readField(author, "uniqueId"),
                 readField(author, "unique_id"),
                 readField(author, "shortId"),
-                readField(author, "short_id"));
+                readField(author, "short_id"),
+                readField(author, "uid"),
+                readField(author, "secUid"));
         if (name == null && id == null) return false;
         a.authorName = name;
         a.authorId = id;
