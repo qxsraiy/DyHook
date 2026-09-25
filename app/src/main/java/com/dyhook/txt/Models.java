@@ -28,8 +28,6 @@ public class Models {
         public String id;
         public String title;
         public String markdown;
-        /** 引言 / 摘要 / 备注（如果有），要放在正文最上面 */
-        public String abstractText;
         public String authorName;
         public String authorId;
     }
@@ -168,8 +166,6 @@ public class Models {
             } catch (Throwable t) {
                 a.markdown = content;
             }
-            // 不再提取「摘要」：抖音没有独立摘要字段，
-            // long_article_abstract 是正文预览，当摘要拼会导致正文重复两遍。
             diag(inst, a.id);
             readAuthor(a);
             return a;

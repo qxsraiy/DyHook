@@ -23,9 +23,6 @@ public class AiProcessService extends Service {
     public static final String SRC_ARTICLE = "article";
     public static final String SRC_PERSONAL = "personal";
 
-    /** 文章引言/备注，要作为正文首行。 */
-    public static final String EXTRA_ABSTRACT = "abstract";
-
     private static volatile boolean running = false;
 
     @Override
@@ -44,7 +41,6 @@ public class AiProcessService extends Service {
         String hintTitle = intent.getStringExtra(EXTRA_TITLE);
         String hintAuthor = intent.getStringExtra(EXTRA_AUTHOR);
         String rawPath = intent.getStringExtra(ProcessReceiver.EXTRA_RAWPATH);
-        String abstractText = intent.getStringExtra(EXTRA_ABSTRACT);
         if (source == null) source = SRC_PERSONAL;
 
         if (text == null || text.trim().isEmpty()) {
@@ -67,11 +63,10 @@ public class AiProcessService extends Service {
         }
 
         final String fText = text.trim(), fSource = source,
-                fTitle = hintTitle, fAuthor = hintAuthor, fRaw = rawPath,
-                fAbs = abstractText;
+                fTitle = hintTitle, fAuthor = hintAuthor, fRaw = rawPath;
         new Thread(() -> {
             try {
-                run(this, fText, fSource, fTitle, fAuthor, fRaw, fAbs);
+                run(this, fText, fSource, fTitle, fAuthor, fRaw);
             } finally {
                 try {
                     stopForeground(true);
@@ -87,13 +82,6 @@ public class AiProcessService extends Service {
     /** 实际处理逻辑（服务 / 抖音进程内直接调用 / 兜底线程共用）。 */
     public static void run(Context ctx, String raw, String source,
                            String hintTitle, String hintAuthor, String rawPath) {
-        run(ctx, raw, source, hintTitle, hintAuthor, rawPath, null);
-    }
-
-    /** 实际处理逻辑（带引言）。 */
-    public static void run(Context ctx, String raw, String source,
-                           String hintTitle, String hintAuthor, String rawPath,
-                           String abstractText) {
         if (running) {
             DyLog.w("[服务] 已有任务在跑，忽略本次");
             return;

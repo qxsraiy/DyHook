@@ -50,11 +50,9 @@ public class Extractor {
                 return;
             }
             new Thread(() -> AiProcessService.run(ctx, content,
-                    AiProcessService.SRC_ARTICLE, title, author, rawPath,
-                    a.abstractText),
+                    AiProcessService.SRC_ARTICLE, title, author, rawPath),
                     "dyhook-ai").start();
-            DyLog.i("[提取] 已在抖音进程内启动 AI 处理"
-                    + (a.abstractText == null ? "（无引言）" : "（含引言）"));
+            DyLog.i("[提取] 已在抖音进程内启动处理");
         } catch (Throwable t) {
             DyLog.e("[提取] 异常: " + t);
             UiCtx.toast("解析出错：" + t.getMessage());
