@@ -132,6 +132,41 @@ public class ForumClient {
         }
     }
 
+    // ==================== token 缓存 ====================
+    // Flarum 的 token 是长效的，没必要每篇都登录一次。
+    // 缓存起来复用，只有遇到 401/403（token 失效）才重新登录。
+
+    private static volatile String cachedToken;
+    private static volatile String cachedUserKey;   // url|username，配置变了就作废
+
+    private static String userKey(Cfg c) {
+        return c.url + "|" + c.username;
+    }
+
+    public static synchronized void clearToken() {
+        cachedToken = null;
+        cachedUserKey = null;
+        DyLog.i("[论坛] token 缓存已清空");
+    }
+
+    /** 拿 token（优先用缓存）。 */
+    public static Result ensureToken(Cfg c, boolean force) {
+        String key = userKey(c);
+        if (!force && cachedToken != null && key.equals(cachedUserKey)) {
+            Result r = new Result();
+            r.token = cachedToken;
+            r.ok = true;
+            DyLog.i("[论坛] 复用已缓存 token");
+            return r;
+        }
+        Result r = login(c);
+        if (r.ok) {
+            cachedToken = r.token;
+            cachedUserKey = key;
+        }
+        return r;
+    }
+
     // ---------- API ----------
 
     /** 登录拿 token。 */
@@ -197,9 +232,9 @@ public class ForumClient {
         return s;
     }
 
-    /** 发新讨论贴。 */
+    /** 发新讨论贴。token 失效会自动重登一次。 */
     public static Result createDiscussion(Cfg c, String title, String content) {
-        Result r = login(c);
+        Result r = ensureToken(c, false);
         if (!r.ok) return r;
 
         try {
@@ -243,6 +278,21 @@ public class ForumClient {
             payload.put("data", data);
 
             Resp resp = post(c.url + "/api/discussions", payload.toString(), r.token);
+
+            // token 失效（401/403）→ 清缓存重登一次再发
+            if (resp.code == 401 || resp.code == 403) {
+                DyLog.w("[论坛] token 失效(" + resp.code + ")，重新登录后重试");
+                clearToken();
+                Result r2 = ensureToken(c, true);
+                if (!r2.ok) {
+                    r.ok = false;
+                    r.error = "重新登录失败：" + r2.error;
+                    return r;
+                }
+                r.token = r2.token;
+                resp = post(c.url + "/api/discussions", payload.toString(), r.token);
+            }
+
             if (resp.code != 201 && resp.code != 200) {
                 r.ok = false;
                 r.error = "发帖失败 HTTP " + resp.code + "：" + truncate(resp.text, 300);

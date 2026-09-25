@@ -37,6 +37,40 @@ public class SendActionReceiver extends BroadcastReceiver {
     private static final int MAX_TRY = 10;
     private static final long RETRY_DELAY_MS = 3000L;
 
+    /**
+     * 串行队列：**单线程执行器**，一次只发一篇，失败重试也排着来。
+     * 这样不会出现「点 10 个 → 10 条线程同时登录同时发」撞 429 的情况。
+     */
+    private static final java.util.concurrent.ExecutorService QUEUE =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "dyhook-send-queue");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** 排队中 / 正在发的数量，用于在通知里显示进度。 */
+    private static final java.util.concurrent.atomic.AtomicInteger PENDING =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
+    /** 排队执行（所有发件入口都走这里）。 */
+    private static void submit(Runnable task) {
+        PENDING.incrementAndGet();
+        QUEUE.submit(() -> {
+            try {
+                task.run();
+            } catch (Throwable t) {
+                DyLog.e("[发件] 队列任务异常: " + t);
+            } finally {
+                PENDING.decrementAndGet();
+            }
+        });
+    }
+
+    /** 当前排队数量（含正在执行的）。 */
+    public static int pendingCount() {
+        return PENDING.get();
+    }
+
     /** 幂等锁：同一文件在 N 秒内只允许发一次（防广播重投/重复点击）。 */
     private static final java.util.Map<String, Long> RECENT = new java.util.HashMap<>();
     private static final long DEDUP_MS = 60_000L;
@@ -94,7 +128,7 @@ public class SendActionReceiver extends BroadcastReceiver {
         }
 
         final PendingResult pr = goAsync();
-        new Thread(() -> {
+        submit(() -> {
             try {
                 doSend(appCtx, path, rawPath, notifId, false);
             } finally {
@@ -103,7 +137,7 @@ public class SendActionReceiver extends BroadcastReceiver {
                 } catch (Throwable ignored) {
                 }
             }
-        }, "dyhook-send").start();
+        });
     }
 
     private static void deleteQuietly(File f) {
@@ -126,7 +160,7 @@ public class SendActionReceiver extends BroadcastReceiver {
         final Context app = ctx.getApplicationContext();
         final int notifId = Notifier.newTaskId();
         final String rawPath = guessRawPath(path);
-        new Thread(() -> {
+        submit(() -> {
             try {
                 doSend(app, path, rawPath, notifId, false);
             } catch (Throwable t) {
@@ -134,7 +168,7 @@ public class SendActionReceiver extends BroadcastReceiver {
                 Notifier.sendFailed(app, notifId, new File(path).getName(),
                         String.valueOf(t.getMessage()));
             }
-        }, "dyhook-uisend").start();
+        });
     }
 
     /**
@@ -187,14 +221,14 @@ public class SendActionReceiver extends BroadcastReceiver {
      * silent = true：不弹通知，只用 Toast 提示成功/失败。
      */
     public static void sendNow(Context ctx, String path, String rawPath, boolean silent) {
-        new Thread(() -> {
+        submit(() -> {
             try {
                 doSend(ctx, path, rawPath, -1, silent);
             } catch (Throwable t) {
                 DyLog.e("[发件] 自动发件异常: " + t);
                 if (silent) toast(ctx, "❌ 发件失败：" + t.getMessage());
             }
-        }, "dyhook-autosend").start();
+        });
     }
 
     /** 核心发件逻辑。notifId < 0 表示静默模式（用 Toast 而非通知）。 */
@@ -214,7 +248,9 @@ public class SendActionReceiver extends BroadcastReceiver {
         }
 
         if (notify) {
-            Notifier.sending(appCtx, notifId, f.getName());
+            int behind = pendingCount() - 1;
+            Notifier.sending(appCtx, notifId, f.getName()
+                    + (behind > 0 ? "\n（队列里还有 " + behind + " 篇在等）" : ""));
             cancelDouyinNotif(appCtx, notifId);
         }
 

@@ -682,6 +682,7 @@ public class MainActivity extends Activity {
                         default: break;
                     }
                     ForumClient.saveCfg(cur);
+                    ForumClient.clearToken();   // 配置变了，旧 token 作废
                     render();
                 })
                 .setNegativeButton("取消", null)
