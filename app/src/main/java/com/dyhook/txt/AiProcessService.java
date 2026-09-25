@@ -173,18 +173,15 @@ public class AiProcessService extends Service {
                 }
                 if (!author.contains("by抖音")) author = author + "by抖音";
 
-                // 标题不足 3 字 → 用作者昵称补全
-                // 目的：避免论坛报 422「标题不得少于 3 个字符」
-                // 例：标题「人」+ 作者「青岚」 → 「人青岚」
+                // 标题不足 3 字 → 直接补 "by抖音"（4 个字，保证过论坛的 ≥3 字校验）
+                // 例：标题「人」→「人by抖音」
+                // 好处：确定性强（不依赖作者名是否拿到），也不会让作者名在标题里重复一遍。
                 String t0 = (title == null) ? "" : title.trim();
                 if (t0.length() < 3) {
-                    String nick = pureNickname(author);
-                    if (!nick.isEmpty() && !t0.endsWith(nick)) {
-                        title = t0 + nick;
-                        DyLog.i("[服务] 标题不足 3 字，已用作者补全: 「" + t0 + "」→「" + title + "」");
-                    } else {
-                        title = t0;
-                    }
+                    title = (t0.isEmpty() ? "无标题" : t0) + "by抖音";
+                    DyLog.i("[服务] 标题不足 3 字，已补 by抖音: 「" + t0 + "」→「" + title + "」");
+                } else {
+                    title = t0;
                 }
             } else {
                 // 第三方分享：标题以 AI 找到/总结的为准（提示词要求至少 3 字）
