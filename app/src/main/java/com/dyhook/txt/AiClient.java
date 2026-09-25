@@ -214,6 +214,91 @@ public class AiClient {
     }
 
     /**
+     * 第三方分享专用：内容通常夹杂大量无关东西（打招呼、广告、表情、
+     * 重复转发的历史记录、乱码、断句），必须让 AI **重写通顺**并**找出/总结标题**。
+     * 这条路径不论 AI 开关都会走。
+     */
+    public static Result analyzeMessy(String rawText, String hintTitle, String hintAuthor) {
+        Result r = new Result();
+        r.url = buildEndpoint();
+        String problem = configProblem();
+        if (problem != null) {
+            r.error = problem;
+            return r;
+        }
+        try {
+            String content = callApi(buildMessyPrompt(rawText, hintTitle, hintAuthor), 8000);
+            r.raw = content;
+            if (content == null || content.trim().isEmpty()) {
+                r.error = "AI 返回为空";
+                return r;
+            }
+            DyLog.i("[AI·第三方] 原始返回长度=" + content.length());
+            parseStructured(content, r);
+            r.ok = r.content != null && !r.content.trim().isEmpty();
+            if (!r.ok) r.error = "AI 返回无法解析成 JSON";
+            return r;
+        } catch (Throwable t) {
+            r.error = "调用异常：" + t.getMessage();
+            DyLog.e("[AI·第三方] " + r.error);
+            return r;
+        }
+    }
+
+    /** 第三方分享的提示词：强调「内容混乱，需要重写通顺」。 */
+    private static String buildMessyPrompt(String raw, String hintTitle, String hintAuthor) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("下面是从第三方应用分享过来的一段文字。\n");
+        sb.append("**这类内容通常非常混乱**：可能夹杂打招呼、寒暄、广告、推广、");
+        sb.append("聊天记录、表情符号、话题标签、@提及、链接、乱码、重复内容、");
+        sb.append("被截断的句子、以及和正文完全无关的段落。\n\n");
+        sb.append("你的任务是：**把真正有价值的内容整理出来，重写通顺，并给出标题**。\n\n");
+        sb.append("【输出要求】\n");
+        sb.append("只输出一个 JSON 对象，不要任何其它文字，不要 markdown 代码块：\n");
+        sb.append("  \"title\"  : 标题。\n");
+        sb.append("  \"author\" : 作者或来源（能从原文看出来就填，看不出来填空字符串）。\n");
+        sb.append("  \"content\": 整理并重写后的正文。\n\n");
+
+        sb.append("【title 的规则 —— 重要】\n");
+        sb.append("1. 原文里有明确标题，就用它。\n");
+        sb.append("2. 原文没有标题，**你必须根据正文自己总结一个**。\n");
+        sb.append("3. **标题至少 3 个字符**，不要输出 1-2 个字的短标题。\n");
+        sb.append("4. 标题不超过 30 字，不要带引号、不要带「标题：」这类前缀。\n\n");
+
+        sb.append("【content 的规则 —— 重写通顺】\n");
+        sb.append("1. **删掉一切与正文无关的东西**：\n");
+        sb.append("   - 打招呼、寒暄、客套（「你好」「在吗」「谢谢」之类）\n");
+        sb.append("   - 广告、推广、引流、二维码说明、加群信息\n");
+        sb.append("   - 话题标签（#xxx#）、@提及、表情符号（[微笑] 等）\n");
+        sb.append("   - 链接、分享口令、来源标注（「来自 xxx」「转发自 xxx」）\n");
+        sb.append("   - 聊天记录里的昵称、时间戳、系统提示\n");
+        sb.append("2. **把被截断、语序混乱、重复啰嗦的句子重写通顺**，让它读起来像一篇正常文章。\n");
+        sb.append("3. **不要改变原意、不要增删事实、不要扩写**，只是整理和通顺化。\n");
+        sb.append("4. 输出必须是**纯文本**：\n");
+        sb.append("   - 不允许出现任何 HTML 标签（`<br>` `<p>` 等），需要换行就直接换行。\n");
+        sb.append("   - 不允许使用 markdown 语法（``` 围栏、反引号、`#` 标题、`>` 引用、`-` 列表）。\n");
+        sb.append("   - **每行开头不要有空格或 Tab 缩进**（会被渲染成代码框）。\n");
+        sb.append("5. 分段用空行；合并连续空行。\n");
+        sb.append("6. content 里不要再包含标题行、作者行。\n\n");
+
+        sb.append("【JSON 格式要求】\n");
+        sb.append("字符串里的换行写成 \\n，双引号写成 \\\"，确保输出是合法 JSON。\n\n");
+        if ((hintTitle != null && !hintTitle.isEmpty())
+                || (hintAuthor != null && !hintAuthor.isEmpty())) {
+            sb.append("【参考信息】（能对上就用，对不上以原文为准）\n");
+            if (hintTitle != null && !hintTitle.isEmpty()) {
+                sb.append("可能相关的标题 = ").append(hintTitle).append('\n');
+            }
+            if (hintAuthor != null && !hintAuthor.isEmpty()) {
+                sb.append("可能相关的作者 = ").append(hintAuthor).append('\n');
+            }
+            sb.append('\n');
+        }
+        sb.append("【原始文本开始】\n").append(raw).append("\n【原始文本结束】\n");
+        return sb.toString();
+    }
+
+    /**
      * 代码级强制清洗（纯本地正则，不依赖 AI、不联网）。
      *
      * 处理四类问题：

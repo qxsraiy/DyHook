@@ -101,10 +101,15 @@ public class AiProcessService extends Service {
         running = true;
         try {
             boolean isArticle = SRC_ARTICLE.equals(source);
-            boolean aiOn = SharedCfg.getBool("ai_enabled", false);
-            String srcLabel = isArticle ? "抖音文章" : "个人复制";
+            // 第三方分享：内容通常夹杂大量无关东西，**强制走 AI 重写**（不论开关）
+            boolean mustAi = !isArticle;
+            boolean aiCfgOn = SharedCfg.getBool("ai_enabled", false);
+            boolean aiOn = aiCfgOn || mustAi;
+            String srcLabel = isArticle ? "抖音文章" : "第三方分享";
+            DyLog.i("[服务] 来源=" + srcLabel + " | 强制AI=" + mustAi
+                    + " | AI开关=" + aiCfgOn + " | 本次走AI=" + aiOn);
 
-            // 1) 源文件：文章路径已由 hook 侧存好；个人复制路径在这里存
+            // 1) 源文件：文章路径已由 hook 侧存好；第三方分享在这里存
             if (rawPath == null || rawPath.isEmpty()) {
                 String rawTitle = (hintTitle != null && !hintTitle.trim().isEmpty())
                         ? hintTitle.trim() : "无标题";
@@ -121,27 +126,35 @@ public class AiProcessService extends Service {
             String aiAuthor = null;
             String aiTitle = null;
 
-            // 2) AI 分析
+            // 2) AI 洗稿（第三方强制；抖音按开关）
             if (aiOn) {
-                DyLog.i("[服务] AI 分析中…");
-                progress(ctx, "AI 分析中…");
-                AiClient.Result r = AiClient.analyze(raw, isArticle, hintTitle, hintAuthor);
+                long t0 = System.currentTimeMillis();
+                progress(ctx, mustAi ? "AI 重写中…" : "AI 分析中…");
+                AiClient.Result r = mustAi
+                        ? AiClient.analyzeMessy(raw, hintTitle, hintAuthor)
+                        : AiClient.analyze(raw, isArticle, hintTitle, hintAuthor);
                 if (r.ok) {
                     aiTitle = r.title;
                     aiAuthor = r.author;
                     content = r.content;
                     DyLog.i("[服务] AI 完成: title=" + aiTitle + " author=" + aiAuthor
-                            + " len=" + content.length());
+                            + " len=" + content.length()
+                            + " 耗时 " + (System.currentTimeMillis() - t0) + "ms");
                 } else {
-                    note = "AI 未生效(" + r.error + ")，成品按原文保存";
+                    note = mustAi
+                            ? "强制 AI 未生效(" + r.error + ")，已降级为本地洗稿"
+                            : "AI 未生效(" + r.error + ")，成品按原文清洗保存";
                     DyLog.w("[服务] " + note);
                 }
             } else {
-                DyLog.i("[服务] AI 未开启，成品按原文保存");
-                content = AiClient.cleanText(content);
+                DyLog.i("[服务] 未走 AI");
             }
 
-            // 3) 组装 标题 / 作者
+            // 3) 本地洗稿（不论走没走 AI，保存/发件前都统一过一遍）
+            content = AiClient.cleanText(content);
+            DyLog.i("[服务] 本地洗稿完成，正文长度=" + (content == null ? 0 : content.length()));
+
+            // 4) 组装 标题 / 作者
             if (isArticle) {
                 if (hintTitle != null && !hintTitle.trim().isEmpty()) {
                     title = hintTitle.trim();
@@ -159,9 +172,18 @@ public class AiProcessService extends Service {
                     author = "未知作者";
                 }
                 if (!author.contains("by抖音")) author = author + "by抖音";
-                // 注意：不再把 long_article_abstract 当摘要拼到正文首行
-                // —— 实测它是正文的预览节选，拼上去会导致正文重复两遍。
+
+                // 标题少于 2 字、且没走 AI → 把作者昵称拼在后面
+                // 例：标题「人」+ 作者「青岚」 → 「人by抖音青岚」
+                if (!aiOn && title != null && title.trim().length() < 2) {
+                    String nick = pureNickname(author);
+                    if (!nick.isEmpty()) {
+                        title = title.trim() + "by抖音" + nick;
+                        DyLog.i("[服务] 标题不足 2 字，已拼上作者: " + title);
+                    }
+                }
             } else {
+                // 第三方分享：标题以 AI 找到/总结的为准（提示词要求至少 3 字）
                 if (aiTitle != null && !aiTitle.trim().isEmpty()) title = aiTitle.trim();
                 if (aiAuthor != null && !aiAuthor.trim().isEmpty()) author = aiAuthor.trim();
                 if (author == null) author = "";
@@ -197,6 +219,16 @@ public class AiProcessService extends Service {
             Notifier.cancelProgress(ctx);
             DyLog.i("[服务] 任务结束，进度通知已清理");
         }
+    }
+
+    /** 从「昵称（抖音号）by抖音」里取出纯昵称。 */
+    private static String pureNickname(String author) {
+        if (author == null) return "";
+        String s = author.trim();
+        if (s.endsWith("by抖音")) s = s.substring(0, s.length() - "by抖音".length());
+        // 去掉结尾的（抖音号）
+        s = s.replaceAll("[（(][^）)]{1,40}[）)]\\s*$", "");
+        return s.trim();
     }
 
     private static void progress(Context ctx, String text) {
