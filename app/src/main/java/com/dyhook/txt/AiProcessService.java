@@ -173,13 +173,17 @@ public class AiProcessService extends Service {
                 }
                 if (!author.contains("by抖音")) author = author + "by抖音";
 
-                // 标题少于 2 字、且没走 AI → 把作者昵称拼在后面
-                // 例：标题「人」+ 作者「青岚」 → 「人by抖音青岚」
-                if (!aiOn && title != null && title.trim().length() < 2) {
+                // 标题不足 3 字 → 用作者昵称补全
+                // 目的：避免论坛报 422「标题不得少于 3 个字符」
+                // 例：标题「人」+ 作者「青岚」 → 「人青岚」
+                String t0 = (title == null) ? "" : title.trim();
+                if (t0.length() < 3) {
                     String nick = pureNickname(author);
-                    if (!nick.isEmpty()) {
-                        title = title.trim() + "by抖音" + nick;
-                        DyLog.i("[服务] 标题不足 2 字，已拼上作者: " + title);
+                    if (!nick.isEmpty() && !t0.endsWith(nick)) {
+                        title = t0 + nick;
+                        DyLog.i("[服务] 标题不足 3 字，已用作者补全: 「" + t0 + "」→「" + title + "」");
+                    } else {
+                        title = t0;
                     }
                 }
             } else {
