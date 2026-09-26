@@ -21,7 +21,9 @@ import subprocess
 import sys
 import zipfile
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+# 支持两种布局：<root>/package.py 和 <root>/tools/package.py
+_here = os.path.dirname(os.path.abspath(__file__))
+ROOT = _here if os.path.exists(os.path.join(_here, "settings.gradle")) else os.path.dirname(_here)
 SRC_APK = os.path.join(ROOT, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
 OUT_APK = os.path.join(ROOT, "DyHook.apk")
 XPOSED_DIR = os.path.join(ROOT, "app", "src", "main", "xposed", "META-INF", "xposed")
