@@ -5,6 +5,29 @@
 
 > 只在**文章详情页**分享才生效，视频链接一律放过。
 
+## 📚 文档
+
+| 文档 | 内容 |
+|---|---|
+| **[docs/HANDOFF.md](docs/HANDOFF.md)** | **交接清单** —— 环境、构建、安装、配置、验证，按顺序做完就能跑 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构与数据流、每个类的职责、输出格式 |
+| [docs/PITFALLS.md](docs/PITFALLS.md) | **14 条实测踩坑**（改代码前必读） |
+| [docs/DEBUGGING.md](docs/DEBUGGING.md) | 日志位置、排查清单、自测流程、frida 用法 |
+| [tools/probes/](tools/probes/) | 逆向过程的探测脚本（含重要结论出处） |
+
+### 快速开始
+
+```bash
+export JAVA_HOME=/path/to/jdk-21
+export ANDROID_HOME=/path/to/Android/Sdk
+
+./gradlew assembleDebug      # 编译
+python tools/package.py      # 注入 META-INF/xposed + 重签名 + arsc 自检
+adb install -r -t DyHook.apk
+```
+
+> 环境要求：**JDK 21** / **compileSdk 37** / Gradle 9.5.1（已带 wrapper）/ Build Tools 36.1.0
+
 ## 当前状态
 
 | 模块 | 状态 |

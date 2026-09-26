@@ -5,9 +5,8 @@ app/build/
 *.idsig
 *.aab
 
-# Gradle
+# Gradle（wrapper 必须提交，否则别人 clone 下来无法构建）
 .gradle/
-gradle/wrapper/gradle-wrapper.jar
 
 # 本机配置（含 SDK 路径，不要提交）
 local.properties
@@ -18,12 +17,13 @@ local.properties
 *.db
 *.db.bak
 *.log
+.release-notes.md
 output/
 bin/
 *.zip
-*.xml.bak
 u*.xml
 tt.xml
 oo.xml
 st.xml
 uu.xml
+*.xml.bak

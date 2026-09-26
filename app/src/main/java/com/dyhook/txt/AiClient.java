@@ -169,6 +169,9 @@ public class AiClient {
         sb.append("这会被渲染成「代码框」，是必须避免的。\n");
         sb.append("   - 不要用 # 做标题、不要用 > 做引用、不要用 - / * 做列表符号。\n");
         sb.append("   - 需要分段就用空行，需要强调就用中文引号或书名号。\n");
+        sb.append("   - **原文里的 markdown 图片 `![说明](图片地址)` 整段删掉**。\n");
+        sb.append("   - **markdown 链接 `[文字](地址)` 只保留文字**，地址删掉。\n");
+        sb.append("   - **所有 URL 一律删掉**（含 douyinpic.com 图片地址、blockview:// 内部引用）。\n");
         sb.append("3. 修正错误的引号写法：\n");
         sb.append("   - 连续重复的引号（如 \"\"文字\"\"、''文字''）→ 修正成一对中文引号「」或\"\"。\n");
         sb.append("   - 中英文引号混用、左右引号不配对 → 统一成中文全角引号。\n");
@@ -269,8 +272,11 @@ public class AiClient {
         sb.append("1. **删掉一切与正文无关的东西**：\n");
         sb.append("   - 打招呼、寒暄、客套（「你好」「在吗」「谢谢」之类）\n");
         sb.append("   - 广告、推广、引流、二维码说明、加群信息\n");
-        sb.append("   - 话题标签（#xxx#）、@提及、表情符号（[微笑] 等）\n");
-        sb.append("   - 链接、分享口令、来源标注（「来自 xxx」「转发自 xxx」）\n");
+        sb.append("   - 话题标签（#xxx#）、@提及、表情符号（[微笑]、🔥 等）\n");
+        sb.append("   - **markdown 图片语法 `![说明](图片地址)` 整段删掉**\n");
+        sb.append("   - **markdown 链接 `[文字](地址)` 只保留文字，地址删掉**\n");
+        sb.append("   - **所有 URL 一律删掉**（含 douyinpic.com、blockview:// 之类）\n");
+        sb.append("   - 分享口令、来源标注（「来自 xxx」「转发自 xxx」）\n");
         sb.append("   - 聊天记录里的昵称、时间戳、系统提示\n");
         sb.append("2. **把被截断、语序混乱、重复啰嗦的句子重写通顺**，让它读起来像一篇正常文章。\n");
         sb.append("3. **不要改变原意、不要增删事实、不要扩写**，只是整理和通顺化。\n");
@@ -309,7 +315,9 @@ public class AiClient {
      */
     public static String cleanText(String s) {
         if (s == null) return null;
-        String t = s;
+        // ⚠ 第一步必须归一化换行符：抖音的正文常常是 \r\n（CRLF），
+        //   不统一的话后面所有按 \n 写的正则（空行折叠、行尾空白、^$ 锚点）全部失效。
+        String t = s.replace("\r\n", "\n").replace("\r", "\n").replace("\u2028", "\n");
 
         // ---------- 1. HTML 标签 ----------
         // 1a) <br> 家族 → 真换行
@@ -344,6 +352,19 @@ public class AiClient {
         // 3b) 去掉行内反引号
         t = t.replace("`", "");
 
+        // ---------- 3.5 markdown 图片 / 链接 / 裸 URL ----------
+        // 3.5a) 图片 ![alt](url) —— 整段删（抖音文章里的配图，正文不需要）
+        t = t.replaceAll("!\\[[^\\]]*\\]\\([^)]*\\)", "");
+        // 3.5b) 抖音内部块引用 [xx](blockview://...) —— 整段删
+        t = t.replaceAll("\\[[^\\]]*\\]\\(blockview://[^)]*\\)", "");
+        // 3.5c) 其它 markdown 链接 [文字](url) —— 保留文字，去掉 URL
+        t = t.replaceAll("\\[([^\\]]*)\\]\\([^)]*\\)", "$1");
+        // 3.5d) 剩下的裸 URL —— 删
+        t = t.replaceAll("https?://\\S+", "");
+        t = t.replaceAll("blockview://\\S*", "");
+        // 3.5e) 图片 URL 参数残留（如 "width=640 height=360"）
+        t = t.replaceAll("(?m)\\s+(width|height)=\\d+(\\s+(width|height)=\\d+)*\\s*$", "");
+
         // ---------- 4. 分享口令 / 引流话术（整行删） ----------
         t = removeNoiseLines(t);
 
@@ -373,6 +394,11 @@ public class AiClient {
         t = t.replaceAll("'([^'\\n]{1,200})'", "‘$1’");
         // 5h) 中文之间的多余空格
         t = t.replaceAll("([\\u4e00-\\u9fa5])\\s+([\\u4e00-\\u9fa5])", "$1$2");
+        // 5i) 标点前的多余空格（删链接后常留下 "文字与  。"）
+        t = t.replaceAll("[ \\t]+([，。！？；：、）】》」』])", "$1");
+        t = t.replaceAll("([（【《「『])[ \\t]+", "$1");
+        // 5j) 行内多余空格收敛
+        t = t.replaceAll("[ \\t]{2,}", " ");
 
         // ---------- 6. 收敛空行 ----------
         t = t.replaceAll("[ \\t]+\\n", "\n");
